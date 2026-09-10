@@ -2,7 +2,7 @@
 
 > 내향인을 위한 랜덤 동행 매칭 서비스 `한뼘` 백엔드 레포지토리
 
-
+<br>
 
 ## 서비스 소개
 
@@ -17,7 +17,7 @@
 
 특정 식당, 시간, 대화 정도를 기반으로 한 혼밥메이트 매칭
 
-
+<br>
 
 ## 기술 스택
 
@@ -35,7 +35,7 @@
 * Kakao Local REST API
 * AWS EC2
 
-
+<br>
 
 ## 프로젝트 구조
 
@@ -125,7 +125,7 @@ com.team4.hanbbyeom
 | `message`  | 프리셋 메시지                  |
 | `global`   | 인증 설정, 예외 처리, 외부 API 연동  |
 
-
+<br>
 
 ## 주요 기능
 
@@ -169,21 +169,23 @@ com.team4.hanbbyeom
 * 5분 정도 늦어요.
 * 장소를 찾지 못했어요.
 
-
+<br>
 
 ## 네이밍 컨벤션
 
-| 분류            | 패턴                | 예시                       |
-| ------------- | ----------------- | ------------------------ |
-| Controller    | `[기능]Controller`  | `MatchController`        |
-| Service       | `[기능]Service`     | `MatchingService`        |
-| Repository    | `[도메인]Repository` | `MatchRequestRepository` |
-| Entity        | 도메인명            | `MatchRequest`           |
-| Request DTO   | `[기능]Request`     | `RunMatchRequest`        |
-| Response DTO  | `[기능]Response`    | `TrustProfileResponse`   |
-| 설정 클래스        | `[기능]Config`      | `SecurityConfig`         |
+| 분류           | 패턴                | 예시                       |
+| ------------ | ----------------- | ------------------------ |
+| Controller   | `[기능]Controller`  | `MatchController`        |
+| Service      | `[기능]Service`     | `MatchingService`        |
+| Repository   | `[도메인]Repository` | `MatchRequestRepository` |
+| Entity       | 도메인명              | `MatchRequest`           |
+| Request DTO  | `[기능]Request`     | `RunMatchRequest`        |
+| Response DTO | `[기능]Response`    | `TrustProfileResponse`   |
+| 설정 클래스       | `[기능]Config`      | `SecurityConfig`         |
 
 DTO 클래스명에 `Dto` 접미사 미사용
+
+<br>
 
 ## 브랜치 전략
 
@@ -221,7 +223,7 @@ fix/matching-25-duplicate-match
 4. **2인 이상 코드 리뷰 및 승인** 후 병합
 5. 배포 가능 상태 확인 후 `develop` → `main` PR 생성
 
-
+<br>
 
 ## 커밋 컨벤션
 
@@ -260,26 +262,30 @@ Feat: 러닝 조건 기반 매칭 API 추가 (#12)
 Resolves: #12
 ```
 
-
+<br>
 
 ## Issue / PR 규칙
 
 ### Issue
-```
+
+```text
 [Tag] 제목
 ```
-- Labels, Assignees 지정 필수
-- 이슈 요약 / 상세 내용 / 체크리스트 / 참고 사항 포함
 
-### Pull Request
-```
+* Labels, Assignees 지정 필수
+* 이슈 요약 / 상세 내용 / 체크리스트 / 참고 사항 포함
+
+### PR
+
+```text
 [Tag] 제목
 ```
-- Labels, Assignees, Reviewers 지정 필수
-- 관련 이슈 / 작업 내용 / 테스트 결과 / 참고 사항 포함
-- **2인 이상 승인 후 병합**
 
+* Labels, Assignees, Reviewers 지정 필수
+* 관련 이슈 / 작업 내용 / 테스트 결과 / 참고 사항 포함
+* **2인 이상 승인 후 병합**
 
+<br>
 
 ## 배포
 
