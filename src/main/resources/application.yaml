@@ -2,9 +2,13 @@ spring:
   application:
     name: hanbbyeom
 
+  # 프로젝트 루트의 .env 파일을 환경설정 파일로 불러옴
+  # optional: 없어도 오류X
   config:
     import: "optional:file:./.env[.properties]"
 
+  # PostgreSQL 접속 정보
+  # 프로젝트 루트의 .env에서 팀원별 DB_URL, DB_USERNAME, DB_PASSWORD를 설정
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -12,65 +16,91 @@ spring:
     driver-class-name: org.postgresql.Driver
 
   jpa:
+    # Controller 응답을 만드는 시점까지 DB 연결을 계속 잡고 있지 않도록 함
+    # 필요한 연관 데이터는 Service의 트랜잭션 안에서 조회
     open-in-view: false
     hibernate:
-      # 스키마 변경은 Flyway로만 관리
+      # Entity와 실제 DB 테이블이 일치하는지만 검사
+      # 테이블 생성·수정은 Hibernate가 아니라 Flyway SQL로만 관리
       ddl-auto: validate
     properties:
       hibernate:
         jdbc:
+          # DB에 날짜와 시간을 저장할 때 서버 위치와 관계없이 UTC 기준을 사용
+          # 사용자에게 보여줄 때는 프론트엔드에서 한국 시간 등 필요한 시간대로 변환
           time_zone: UTC
 
+  # src/main/resources/db/migration 안의 V1__, V2__ 형식 SQL을 순서대로 실행
+  # 이미 실행된 SQL 파일은 수정하지 말고, 변경 사항은 새로운 번호의 파일로 추가
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # 기존 DB를 임의로 현재 기준점으로 등록하지 않으며, 새 프로젝트 DB에서 시작한
     baseline-on-migrate: false
+    # 실수로 Flyway clean을 실행해 모든 테이블이 삭제되는 것을 막음
     clean-disabled: true
 
   sql:
     init:
+      # schema.sql/data.sql 자동 실행 끔(DB 초기화 방법을 Flyway 하나로 통일)
       mode: never
 
-  # SMTP 계정은 이메일 기능 담당자가 .env에 입력
-  # 메일 연결 검사는 실제 발송 시 수행
+  # 이메일 인증번호를 보낼 SMTP 서버 설정
+  # 이메일 기능 담당자(문채이):.env에 계정 정보를 입력, 비밀번호는 Git에 푸시X
   mail:
+    # ${MAIL_HOST:기본값} 형식: MAIL_HOST가 없으면 콜론 뒤 값을 사용한다는 뜻
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
     username: ${MAIL_USERNAME:}
     password: ${MAIL_PASSWORD:}
     default-encoding: UTF-8
+    # 앱 시작 때 SMTP 접속 검사X (메일 계정이 없어도 다른 팀원 개발 가능)
     test-connection: false
     properties:
+      # 587 포트에서 사용자 인증과 STARTTLS 암호화 연결을 사용
       "[mail.smtp.auth]": true
       "[mail.smtp.starttls.enable]": true
       "[mail.smtp.starttls.required]": true
+      # SMTP 장애 때문에 요청이 오래 멈추지 않도록 각 대기 시간을 5초로 제한
       "[mail.smtp.connectiontimeout]": 5000
       "[mail.smtp.timeout]": 5000
       "[mail.smtp.writetimeout]": 5000
 
 server:
+  # SERVER_PORT가 없으면 기본 포트 8080으로 실행
   port: ${SERVER_PORT:8080}
   error:
+    # Spring의 기본 오류 응답에 내부 메시지, 스택 트레이스, 검증 상세를 노출X
+    # 이후 GlobalExceptionHandler에서 팀의 공통 ErrorResponse를 만들어 반환
     include-message: never
     include-stacktrace: never
     include-binding-errors: never
 
+# Swagger API 문서 설정
+# 실행 후 기본 주소: http://localhost:8080/swagger-ui.html
 springdoc:
   api-docs:
+    # 배포 환경에서는 .env의 SWAGGER_ENABLED=false로 문서를 끌 수 있음
     enabled: ${SWAGGER_ENABLED:true}
     path: /v3/api-docs
   swagger-ui:
     enabled: ${SWAGGER_ENABLED:true}
     path: /swagger-ui.html
 
-# 팀 공통 설정 계약 (Spring Boot가 JWT/CORS를 자동 구현하지 않음)
-# 담당A(문채이): @ConfigurationProperties와 Security 설정에서 연결
+# JWT를 만들고 검증할 때 사용할 팀 공통 값
+# 담당자(문채이)가 JwtProperties와 Security 코드에 연결해야 함
 jwt:
+  # 토큰 서명용 비밀키. 실제 값은 각자의 .env에만 저장
   secret-base64: ${JWT_SECRET_BASE64}
+  # 우리 서버가 발급한 토큰임을 나타내는 발급자 이름
   issuer: hanbbyeom
+  # 30m은 30분, 7d는 7일. JwtProperties에서 Duration 타입으로 받음
   access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION:30m}
   refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:7d}
 
 app:
   cors:
+    # 브라우저에서 백엔드 API 호출을 허용할 프론트엔드 주소 목록
+    # 여러 주소는 쉼표로 구분하고, 마지막에 /를 붙이지 않음
+    # 담당자(문채이)가 SecurityConfig의 CORS 설정에 연결해야 실제로 적용됨
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
