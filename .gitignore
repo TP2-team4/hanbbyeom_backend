@@ -1,4 +1,8 @@
-HELP.md
+### 로컬 환경 설정 / 시크릿키 ###
+.env
+.env.*
+!.env.example
+
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar
