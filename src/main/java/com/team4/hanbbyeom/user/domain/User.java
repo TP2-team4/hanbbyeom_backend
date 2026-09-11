@@ -14,9 +14,13 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-import java.time.OffsetDateTime;
+import java.time.Instant;
+// OffsetDateTime: 날짜·시간과 UTC 기준 시차를 함께 표현
+// Instant: 전 세계에서 동일한 하나의 UTC 시점을 표현
+// TIMESTAMPTZ는 원래 시차를 보존하는 것이 아닌 동일한 시점을 저장하므로 Instant 사용
+// 화면 표시 시 프론트엔드에서 한국 시간 등 사용자 시간대로 변환
 
-// 사용자 계정과 이메일 인증 및 탈퇴 상태를 나타내는 User 엔티티
+// 사용자 계정과 이메일 인증 및 탈퇴 상태를 나타내는 User Entity
 
 @Entity
 @Table(name = "users")
@@ -49,21 +53,21 @@ public class User {
 
     // 회원가입 이메일 인증 완료 시각 (탈퇴 시 NULL)
     @Column(name = "email_verified_at")
-    private OffsetDateTime emailVerifiedAt;
+    private Instant emailVerifiedAt;
 
     // 회원 탈퇴 시각 (활성 회원은 NULL)
     @Column(name = "deleted_at")
-    private OffsetDateTime deletedAt;
+    private Instant deletedAt;
 
     // 계정 생성 시각 (Entity 최초 저장 시 자동으로 기록)
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private OffsetDateTime createdAt;
+    private Instant createdAt;
 
     // 계정 마지막 수정 시각 (Entity 변경 시 자동으로 갱신)
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
-    private OffsetDateTime updatedAt;
+    private Instant updatedAt;
 
     // 생성자
     // 이메일 인증 완료 후 가입이 완료된 사용자를 생성
@@ -73,7 +77,7 @@ public class User {
             String email,
             String passwordHash,
             String nickname,
-            OffsetDateTime emailVerifiedAt
+            Instant emailVerifiedAt
             // deletedAt                → 활성 회원이므로 NULL
             // createdAt                → JPA Auditing이 자동 기록
             // updatedAt                → JPA Auditing이 자동 기록
