@@ -1,0 +1,76 @@
+name: Close issues on dev merge
+
+# dev 대상 Pull Request가 닫힌 시점의 이슈 종료 확인
+# pull_request_target: 쓰기 권한이 필요한 자동화를 기본 브랜치의 안전한 코드로 실행하는 이벤트
+# PR 브랜치의 코드를 내려받거나 실행하지 않고 PR 본문만 조회하는 용도
+on:
+  pull_request_target:
+    branches:
+      - dev
+    types:
+      - closed
+
+# Pull Request 조회와 이슈 종료에 필요한 최소 권한
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  close-linked-issues:
+    name: 연결 이슈 종료
+    # 단순 PR 닫기 제외 및 실제 병합 완료 시에만 실행
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      # 별도 Personal Access Token 없이 저장소 기본 GITHUB_TOKEN 사용
+      - name: PR 본문의 연결 이슈 종료
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pullRequestBody = context.payload.pull_request.body ?? '';
+
+            // PR 본문의 Closes/Fixes/Resolves #번호 형식 추출
+            const closingKeywordPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(\d+)\b/gi;
+            const issueNumbers = [
+              ...new Set(
+                [...pullRequestBody.matchAll(closingKeywordPattern)]
+                  .map((match) => Number(match[1]))
+              )
+            ];
+
+            if (issueNumbers.length === 0) {
+              core.notice('PR 본문에서 종료 키워드가 포함된 이슈 번호를 찾지 못했습니다.');
+              return;
+            }
+
+            for (const issueNumber of issueNumbers) {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+
+              // GitHub Issues API에 함께 포함되는 Pull Request 번호 제외
+              if (issue.pull_request) {
+                core.warning(`#${issueNumber}은 이슈가 아니라 Pull Request이므로 제외합니다.`);
+                continue;
+              }
+
+              // 이미 종료된 이슈에 대한 중복 요청 제외
+              if (issue.state !== 'open') {
+                core.info(`#${issueNumber}은 이미 종료된 이슈입니다.`);
+                continue;
+              }
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+
+              core.info(`#${issueNumber} 이슈 종료 완료`);
+            }
