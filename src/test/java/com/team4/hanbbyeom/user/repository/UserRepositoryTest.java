@@ -5,6 +5,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -13,6 +14,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // User Entity와 이메일 조회 쿼리 메서드의 PostgreSQL 연동 검증
@@ -25,7 +27,7 @@ class UserRepositoryTest {
     private UserRepository userRepository;
 
     @Test // 테스트 메서드
-    @DisplayName("이메일로 탈퇴하지 않은 사용자를 조회한다") // 테스트 결과 화면에서 읽기 좋은 이름으로 보여줌
+    @DisplayName("탈퇴하지 않은 사용자를 이메일로 조회") // 테스트 결과 화면에서 읽기 좋은 이름으로 보여줌
     void findByEmailAndDeletedAtIsNullReturnsUser() {
         // 기존 데이터와 이메일이 겹치지 않는 테스트 사용자 생성
         String email = "repository-" + UUID.randomUUID() + "@example.com";
@@ -51,5 +53,43 @@ class UserRepositoryTest {
         assertTrue(userRepository.existsByEmailAndDeletedAtIsNull(email)); // 활성 사용자 존재 여부 조회가 true인지 확인
         assertNotNull(foundUser.get().getCreatedAt()); // 생성 시각이 자동 기록되었는지 확인
         assertNotNull(foundUser.get().getUpdatedAt()); // 수정 시각이 자동 기록되었는지 확인
+    }
+
+    @Test
+    @DisplayName("대문자가 포함된 이메일 저장을 거부")
+    void saveRejectsUppercaseEmail() {
+        User user = new User(
+                "Repository-" + UUID.randomUUID() + "@example.com",
+                "encoded-password",
+                "테스트사용자",
+                Instant.now()
+        );
+
+        // assertThrows
+        // 이 코드를 실행했을 때 특정 예외가 발생해야 테스트 성공이라고 검증 (JUnit 함수)
+        // 예외 발생X 또는 다른 예외 발생 시 테스트 실패
+
+        // 소문자로 정규화되지 않은 이메일의 DB 저장 실패 확인
+        assertThrows(
+                DataIntegrityViolationException.class,
+                () -> userRepository.saveAndFlush(user)
+        );
+    }
+
+    @Test
+    @DisplayName("앞뒤 공백이 포함된 이메일 저장을 거부")
+    void saveRejectsEmailWithSurroundingWhitespace() {
+        User user = new User(
+                " repository-" + UUID.randomUUID() + "@example.com ",
+                "encoded-password",
+                "테스트사용자",
+                Instant.now()
+        );
+
+        // 앞뒤 공백이 제거되지 않은 이메일의 DB 저장 실패 확인
+        assertThrows(
+                DataIntegrityViolationException.class,
+                () -> userRepository.saveAndFlush(user)
+        );
     }
 }
