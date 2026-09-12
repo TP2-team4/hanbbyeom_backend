@@ -6,18 +6,22 @@ import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage; // HTML, 이미지, 첨부파일, 인라인 이미지 등을 포함하는 복잡한 이메일 표현 가능
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value; // Spring 설정값을 필드에 주입하기 위해 사용하는 @Value 어노테이션
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.javamail.JavaMailSender; // 메일 발송 인터페이스
 import org.springframework.mail.javamail.MimeMessageHelper; // MimeMessage를 좀 더 쉽게 작성하게 지원
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.crypto.Mac; // (Java 제공) MAC(Message Authentication Code)을 계산하는 클래스 - 비밀키 사용하는 HMAC 계산용
+import javax.crypto.spec.SecretKeySpec; // 바이트 배열로 가지고 있는 비밀키를 Java가 HMAC 키로 사용할 수 있도록 비밀키 객체로 만드는 클래스
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import java.security.InvalidKeyException; // HMAC에 넘긴 비밀키가 올바르지 않을 때 발생할 수 있는 예외
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64; // Base64 문자열 ↔ 바이트 배열 변환
 import java.util.HexFormat;
 import java.util.Locale;
 
@@ -38,6 +42,11 @@ public class EmailVerificationService {
     // Service 동작에 필요한 도구(의존성) 선언 필드
     private final EmailVerificationRepository emailVerificationRepository; // 이메일 인증 기록을 DB에 저장하고 조회하기 위해 사용
     private final JavaMailSender mailSender; // (Spring 제공) 메일 발송 도구 인터페이스
+
+    // 인증 코드 해시(HMAC-SHA256)용 서버 전용 비밀키 (application.yaml → .env)
+    // DB만 유출된 경우 이 키가 없으면 인증 코드를 역산할 수 없도록 함
+    @Value("${email.verification.hmac-secret-base64}")
+    private String hmacSecretBase64; // .env에 있는 설정값을 이 필드에 그대로 넣음
 
     // @Transactional: 이 메서드 안의 DB 작업을 하나의 트랜잭션으로 처리, 하나가 실패하면 모두 롤백
     // 인증 코드 생성, 해시 저장, 메일 발송을 한 번에 처리
@@ -104,26 +113,37 @@ public class EmailVerificationService {
         return String.format("%0" + CODE_LENGTH + "d", value);
     }
 
-    // 인증 코드 원문을 SHA-256 해시로 변환 (원문은 저장하지 않음)
+    // 이전 (SHA-256): 코드 원문만 넣고 해시 계산, 비밀키 없음
+    // 지금 (HMAC-SHA256): 해시 계산에 코드 원문뿐 아니라 서버 비밀키까지 포함 → DB 유출만으로는 원본 코드 역산 불가
+
+    // 인증 코드 원문을 HMAC-SHA256 해시로 변환 (원문은 저장하지 않음)
     private String hash(String rawCode) {
         try {
-            // MessageDigest: (Java 제공) 해시 계산용 추상 클래스
-            MessageDigest digest =
-                    // 문자열로 알고리즘 이름 지정 -> "SHA-256" 지정
-                    // SHA-256 알고리즘을 사용하는 MessageDigest 객체를 만들어 달라고 요청
-                    MessageDigest.getInstance("SHA-256");
+            // .env에 Base64 문자열로 저장된 비밀키를 원래 바이트 배열로 복원
+            byte[] keyBytes = Base64.getDecoder().decode(hmacSecretBase64);
+
+            // HMAC 계산에 사용할 비밀키 객체 생성
+            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "HmacSHA256");
+
+            // Mac: (Java 제공) 비밀키 기반 해시(HMAC) 계산용 클래스
+            // getInstance()로 만든 시점에는 알고리즘만 정해졌을 뿐 키가 없는 상태
+            Mac mac = Mac.getInstance("HmacSHA256");
+
+            // keySpec을 실제로 장착해야 계산 가능한 상태가 됨
+            // init() 없이 doFinal() 호출 시 IllegalStateException 발생
+            mac.init(keySpec);
 
             // 1. rawCode는 String이므로 UTF-8 규칙으로 byte[]로 변환
-            // 2. digest.digest(byte[])를 실행해 SHA-256 해시 계산
-            // 3. SHA-256 결과는 256bit = 32byte이므로 hashBytes에는 32byte짜리 해시 결과가 저장
-            byte[] hashBytes = digest.digest(rawCode.getBytes(StandardCharsets.UTF_8));
+            // 2. mac.doFinal(byte[])을 실행해 비밀키가 섞인 HMAC-SHA256 해시 계산
+            // 3. 결과는 256bit = 32byte이므로 hashBytes에는 32byte짜리 해시 결과가 저장
+            byte[] hashBytes = mac.doFinal(rawCode.getBytes(StandardCharsets.UTF_8));
 
-            // SHA-256 결과는 현재 byte[] 형태이므로 DB에 문자열로 저장하기 편하도록 16진수 문자열로 변환
+            // 결과는 현재 byte[] 형태이므로 DB에 문자열로 저장하기 편하도록 16진수 문자열로 변환
             // 32byte → 64자리 16진수 문자열
             return HexFormat.of().formatHex(hashBytes);
 
-        } catch (NoSuchAlgorithmException e) {
-            // getInstance("SHA-256")에서 해당 해시 알고리즘을 사용할 수 없을 경우 발생하는 예외
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            // 해시 알고리즘을 사용할 수 없거나 비밀키 형식이 잘못된 경우 발생하는 예외
             throw new IllegalStateException("해시 알고리즘을 사용할 수 없습니다.", e);
         }
     }
