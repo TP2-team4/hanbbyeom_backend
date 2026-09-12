@@ -17,6 +17,7 @@ import javax.crypto.Mac; // (Java 제공) MAC(Message Authentication Code)을 �
 import javax.crypto.spec.SecretKeySpec; // 바이트 배열로 가지고 있는 비밀키를 Java가 HMAC 키로 사용할 수 있도록 비밀키 객체로 만드는 클래스
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException; // HMAC에 넘긴 비밀키가 올바르지 않을 때 발생할 수 있는 예외
+import java.security.MessageDigest; // 타이밍 공격 방지용 정해진 시간 비교(isEqual) 제공
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -38,6 +39,9 @@ public class EmailVerificationService {
 
     // 재전송 최소 대기시간
     private static final Duration RESEND_INTERVAL = Duration.ofSeconds(60);
+
+    // 인증 코드 입력 실패 허용 횟수 (무차별 대입 방지)
+    private static final int MAX_ATTEMPT_COUNT = 5;
 
     // Service 동작에 필요한 도구(의존성) 선언 필드
     private final EmailVerificationRepository emailVerificationRepository; // 이메일 인증 기록을 DB에 저장하고 조회하기 위해 사용
@@ -72,6 +76,48 @@ public class EmailVerificationService {
 
         // 이메일 발송 (해시값인 codeHash가 아니라 원본 코드 code 발송)
         sendEmail(email, code);
+    }
+
+    // @Transactional: 조회한 verification의 필드 변경(increaseAttemptCount, markVerified)이
+    // 트랜잭션 커밋 시점에 JPA dirty checking으로 자동 반영됨 (별도 save() 호출 불필요)
+    // 이메일 인증 코드 확인: 사용 여부·만료·시도 횟수 검증 후 코드 일치 여부 확인
+    @Transactional
+    public void confirmCode(String rawEmail, VerificationPurpose purpose, String rawCode) {
+        String email = normalize(rawEmail);
+
+        // 이메일+목적으로 가장 최근에 생성된 인증 기록만 유효한 확인 대상으로 조회
+        EmailVerification verification = emailVerificationRepository
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                .orElseThrow(() -> new IllegalStateException("인증 코드 발송 내역이 없습니다. 인증 코드를 먼저 요청해주세요."));
+
+        // 이미 인증에 성공해 사용 완료된 코드인지 확인 (일회성 사용 보장)
+        if (verification.getVerifiedAt() != null) {
+            throw new IllegalStateException("이미 사용된 인증 코드입니다.");
+        }
+
+        // 유효기간이 지났는지 확인
+        if (Instant.now() // 현재 시각
+                .isAfter( // 검사: 현재 시각이 만료 시각보다 나중인가?
+                        verification.getExpiresAt() // DB에 저장된 인증번호 만료 시각
+                )
+        ) {
+            throw new IllegalStateException("인증 코드가 만료되었습니다. 인증 코드를 다시 요청해주세요.");
+        }
+
+        // 이 코드에 대한 입력 실패 횟수가 허용 범위(5회)를 넘었는지 확인 (무차별 대입 방지)
+        if (verification.getAttemptCount() >= MAX_ATTEMPT_COUNT) {
+            throw new IllegalStateException("인증 시도 횟수를 초과했습니다. 인증 코드를 다시 요청해주세요.");
+        }
+
+        // 입력한 코드와 저장된 해시가 일치하는지 확인
+        if (!matchesHash(rawCode, verification.getCodeHash())) {
+            // 불일치 시 실패 횟수 증가
+            verification.increaseAttemptCount();
+            throw new IllegalStateException("인증 코드가 일치하지 않습니다.");
+        }
+
+        // 일치하면 인증 완료 처리
+        verification.markVerified(Instant.now());
     }
 
     // 이메일 앞뒤 공백 제거 및 소문자 변환 (users 테이블과 동일한 정규화 규칙)
@@ -146,6 +192,17 @@ public class EmailVerificationService {
             // 해시 알고리즘을 사용할 수 없거나 비밀키 형식이 잘못된 경우 발생하는 예외
             throw new IllegalStateException("해시 알고리즘을 사용할 수 없습니다.", e);
         }
+    }
+
+    // 입력한 코드를 해시로 변환해 저장된 해시와 값이 같은지 비교
+    // String.equals()는 앞에서부터 다른 지점이 나오면 즉시 비교를 멈춰서,
+    // 그 소요 시간 차이로 정답에 가까운 값이 추측될 수 있음(타이밍 공격)
+    // → MessageDigest.isEqual(): 일부러 끝까지 다 비교한 다음에 결과를 반환
+    private boolean matchesHash(String rawCode, String expectedHash) {
+        String actualHash = hash(rawCode);
+        byte[] actualBytes = HexFormat.of().parseHex(actualHash);
+        byte[] expectedBytes = HexFormat.of().parseHex(expectedHash);
+        return MessageDigest.isEqual(actualBytes, expectedBytes);
     }
 
     // 로고 이미지 리소스 경로 (src/main/resources/mail/logo.png)
