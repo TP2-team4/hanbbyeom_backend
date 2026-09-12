@@ -331,6 +331,13 @@ INSERT INTO matching_mutex(id) VALUES (1);
 -- 애플리케이션 계층 필수 구현 항목 (참고용 — V1의 형식을 따름)
 -- ============================================================
 -- 게시글(match_request) 생성 Service: search_expires_at 계산 로직 (scheduled_at 기준 역산)
+--                                    ※ scheduled_at을 너무 임박하게(예: 몇 분~1시간 이내) 등록하면
+--                                      역산된 search_expires_at이 created_at보다 앞설 수 있어
+--                                      chk_match_request_time 위반(500 에러)이 날 수 있음.
+--                                      DB에 저장 시도하기 전에 "scheduled_at은 지금부터 최소
+--                                      N시간 이후여야 한다" 같은 사전 검증을 넣고, 위반 시
+--                                      400으로 응답할 것 (activity_match의 decision_expires_at
+--                                      계산도 같은 이유로 동일한 사전 검증이 필요함)
 -- 게시글 생성 Service: 이미 활성 게시글/참여가 있으면(uq_match_request_active_user 위반) 예외 처리
 -- 모집 탭 목록 Service: status='SEARCHING' + activity_type='RUN' 조건으로만 조회, 본인 글 제외
 -- 신청(apply) Service: matching_mutex 행을 SELECT ... FOR UPDATE로 먼저 잠그고 트랜잭션 시작
