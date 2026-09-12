@@ -10,9 +10,9 @@ spring:
   # PostgreSQL 접속 정보
   # 프로젝트 루트의 .env에서 팀원별 DB_URL, DB_USERNAME, DB_PASSWORD를 설정
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    url: jdbc:postgresql://localhost:5432/hanbbyeom
+    username: wwcha
+    password: 2917wwCK**
     driver-class-name: org.postgresql.Driver
 
   jpa:
