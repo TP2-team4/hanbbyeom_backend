@@ -120,6 +120,24 @@ public class EmailVerificationService {
         verification.markVerified(Instant.now());
     }
 
+    // 조회만 하고 값을 변경하지 않으므로 readOnly = true (성능 최적화, 실수로 값 변경 시 예외 발생)
+    @Transactional(readOnly = true)
+    // 이 이메일이 전달받은 목적에 대해 가장 최근 인증 요청 기준으로 인증 완료됐는지 확인하는 메서드
+    // #2 회원가입 Service가 가입 완료 처리 전에 호출해서 사용
+    public boolean isVerified(String rawEmail, VerificationPurpose purpose) {
+        String email = normalize(rawEmail); // 이메일 정규화
+
+        return emailVerificationRepository
+                // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증 기록 1개를 가져옴
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                // Optional 안에 EmailVerification 객체가 있다면 꺼내서 boolean 값으로 변환
+                .map(verification
+                        // 인증 완료 시간이 있는지 조회
+                        -> verification.getVerifiedAt() != null)
+                // Optional이 비어 있을 때 사용할 기본값 (발송 내역 자체가 없으면 인증 안 된 것으로 처리)
+                .orElse(false);
+    }
+
     // 이메일 앞뒤 공백 제거 및 소문자 변환 (users 테이블과 동일한 정규화 규칙)
     private String normalize(String email) {
         return email
