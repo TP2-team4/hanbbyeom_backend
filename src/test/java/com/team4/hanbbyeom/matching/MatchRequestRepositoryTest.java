@@ -15,7 +15,7 @@ import java.time.OffsetDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-@Transactional // 테스트가 끝나면 저장한 데이터를 자동으로 롤백해서 DB를 깨끗하게 유지
+@Transactional
 class MatchRequestRepositoryTest {
 
     @Autowired
@@ -25,11 +25,10 @@ class MatchRequestRepositoryTest {
     private JdbcTemplate jdbcTemplate;
 
     private Long testUserId;
+    private Long testRunMatchConditionId;
 
     @BeforeEach
-    void 테스트용_유저를_미리_만들어둔다() {
-        // users 테이블의 CHECK 제약(chk_users_account_lifecycle)이 활성 유저는
-        // email/password_hash/nickname/email_verified_at을 전부 요구하므로 다 채워서 넣는다.
+    void 테스트용_유저와_코스조건을_미리_만들어둔다() {
         testUserId = jdbcTemplate.queryForObject(
                 """
                 INSERT INTO users (email, password_hash, nickname, email_verified_at)
@@ -38,23 +37,30 @@ class MatchRequestRepositoryTest {
                 """,
                 Long.class
         );
+
+        testRunMatchConditionId = jdbcTemplate.queryForObject(
+                """
+                INSERT INTO run_match_condition (course_name, distance_meters, pace_min_sec, pace_max_sec, meeting_point, region)
+                VALUES ('뚝섬 한강공원', 8000, 360, 400, '뚝섬유원지역 3번 출구', '뚝섬 한강공원')
+                RETURNING id
+                """,
+                Long.class
+        );
     }
 
     @Test
     void 저장하고_아이디로_다시_조회할_수_있다() {
-        // given
         MatchRequest request = new MatchRequest(
-                testUserId,                            // 방금 만든 진짜 유저의 ID 사용
-                OffsetDateTime.now().plusDays(1),      // scheduledAt
+                testUserId,
+                testRunMatchConditionId,
+                OffsetDateTime.now().plusDays(1),
                 TalkLevel.SILENT,
-                OffsetDateTime.now().plusHours(12)     // searchExpiresAt
+                OffsetDateTime.now().plusHours(12)
         );
 
-        // when
         MatchRequest saved = matchRequestRepository.save(request);
         MatchRequest found = matchRequestRepository.findById(saved.getId()).orElseThrow();
 
-        // then
         assertThat(found.getTalkLevel()).isEqualTo(TalkLevel.SILENT);
         assertThat(found.getUserId()).isEqualTo(testUserId);
     }

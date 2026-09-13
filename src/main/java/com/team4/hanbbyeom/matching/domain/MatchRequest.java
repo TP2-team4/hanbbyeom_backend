@@ -1,7 +1,6 @@
 package com.team4.hanbbyeom.matching.domain;
 
 import jakarta.persistence.*;
-
 import java.time.OffsetDateTime;
 
 @Entity
@@ -15,8 +14,11 @@ public class MatchRequest {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "run_match_condition_id", nullable = false)
+    private Long runMatchConditionId;
+
     @Column(name = "activity_type", nullable = false, length = 10)
-    private String activityType = "RUN"; // 1차 MVP는 RUN 고정
+    private String activityType = "RUN";
 
     @Column(name = "scheduled_at", nullable = false)
     private OffsetDateTime scheduledAt;
@@ -38,13 +40,12 @@ public class MatchRequest {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
-    protected MatchRequest() {
-        // JPA가 내부적으로 객체를 만들 때 쓰는 빈 생성자. 직접 호출하지 않아요.
-    }
+    protected MatchRequest() {}
 
-    public MatchRequest(Long userId, OffsetDateTime scheduledAt, TalkLevel talkLevel,
-                        OffsetDateTime searchExpiresAt) {
+    public MatchRequest(Long userId, Long runMatchConditionId, OffsetDateTime scheduledAt,
+                        TalkLevel talkLevel, OffsetDateTime searchExpiresAt) {
         this.userId = userId;
+        this.runMatchConditionId = runMatchConditionId;
         this.scheduledAt = scheduledAt;
         this.talkLevel = talkLevel;
         this.searchExpiresAt = searchExpiresAt;
@@ -54,6 +55,7 @@ public class MatchRequest {
 
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
+    public Long getRunMatchConditionId() { return runMatchConditionId; }
     public String getActivityType() { return activityType; }
     public OffsetDateTime getScheduledAt() { return scheduledAt; }
     public TalkLevel getTalkLevel() { return talkLevel; }
@@ -65,5 +67,20 @@ public class MatchRequest {
     public void changeStatus(MatchRequestStatus newStatus) {
         this.status = newStatus;
         this.updatedAt = OffsetDateTime.now();
+    }
+
+    // Day2 신규 — "모집글 수정": 아직 신청자가 없는(SEARCHING) 상태에서만 허용
+    public void changeConditions(OffsetDateTime scheduledAt, TalkLevel talkLevel, OffsetDateTime searchExpiresAt) {
+        if (this.status != MatchRequestStatus.SEARCHING) {
+            throw new IllegalStateException("모집 중인 게시글만 수정할 수 있어요.");
+        }
+        this.scheduledAt = scheduledAt;
+        this.talkLevel = talkLevel;
+        this.searchExpiresAt = searchExpiresAt;
+        this.updatedAt = OffsetDateTime.now();
+    }
+
+    public boolean isOwnedBy(Long userId) {
+        return this.userId.equals(userId);
     }
 }
