@@ -5,7 +5,8 @@ import java.time.OffsetDateTime;
 public record MatchRequestDetailResponse(
         Long id,
         String courseName,
-        Integer distanceMeters,
+        Integer distanceMinMeters,
+        Integer distanceMaxMeters,
         Integer paceMinSec,
         Integer paceMaxSec,
         String meetingPoint,
