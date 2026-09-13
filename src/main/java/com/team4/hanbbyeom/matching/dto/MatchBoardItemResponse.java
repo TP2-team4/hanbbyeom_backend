@@ -5,11 +5,13 @@ import java.time.OffsetDateTime;
 public record MatchBoardItemResponse(
         Long id,
         String courseName,
-        Integer distanceMeters,
+        Integer distanceMinMeters,
+        Integer distanceMaxMeters,
         String talkLevel,
         OffsetDateTime scheduledAt,
         Integer paceMinSec,
         Integer paceMaxSec,
+        boolean isApplied,
         AuthorSummary author
 ) {
     public record AuthorSummary(

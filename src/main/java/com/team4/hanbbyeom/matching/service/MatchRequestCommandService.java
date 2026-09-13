@@ -10,6 +10,7 @@ import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,9 +26,11 @@ public class MatchRequestCommandService {
     private static final long SEARCH_WINDOW_HOURS = 1;  // "시작 1시간 전에 모집 마감"
 
     private final MatchRequestRepository matchRequestRepository;
+    private final JdbcTemplate jdbcTemplate;
 
-    public MatchRequestCommandService(MatchRequestRepository matchRequestRepository) {
+    public MatchRequestCommandService(MatchRequestRepository matchRequestRepository, JdbcTemplate jdbcTemplate) {
         this.matchRequestRepository = matchRequestRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -37,18 +40,32 @@ public class MatchRequestCommandService {
 
         MatchRequest matchRequest = new MatchRequest(
                 userId,
-                request.runMatchConditionId(),
                 request.scheduledAt(),
                 TalkLevel.valueOf(request.talkLevel()),
                 searchExpiresAt
         );
 
+        Long matchRequestId;
         try {
-            return matchRequestRepository.save(matchRequest).getId();
+            matchRequestId = matchRequestRepository.save(matchRequest).getId();
         } catch (DataIntegrityViolationException e) {
             // uq_match_request_active_user 위반: 이미 활성 게시글/신청이 있는 사용자
             throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 모집글 또는 신청이 있어요.");
         }
+
+        // match_request가 먼저 커밋 대기 상태로 존재해야 이 INSERT의 FK(match_request_id)가 통과함
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                matchRequestId, request.courseId(), request.meetingPoint(),
+                request.distanceMinMeters(), request.distanceMaxMeters(),
+                request.paceMinSec(), request.paceMaxSec()
+        );
+
+        return matchRequestId;
     }
 
     @Transactional
@@ -56,7 +73,22 @@ public class MatchRequestCommandService {
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "수정");
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);
+
+        // 1) 도메인 상태 검증을 먼저 — SEARCHING이 아니면 여기서 IllegalStateException이 터지고
+        //    아래 run_match_condition UPDATE는 아예 실행되지 않음
         matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
+
+        // 2) 검증을 통과한 요청만 run_match_condition에 반영
+        jdbcTemplate.update(
+                """
+                UPDATE run_match_condition
+                SET course_id = ?, meeting_point = ?, distance_min_meters = ?, distance_max_meters = ?,
+                    pace_min_sec = ?, pace_max_sec = ?
+                WHERE match_request_id = ?
+                """,
+                request.courseId(), request.meetingPoint(), request.distanceMinMeters(), request.distanceMaxMeters(),
+                request.paceMinSec(), request.paceMaxSec(), matchRequestId
+        );
     }
 
     @Transactional

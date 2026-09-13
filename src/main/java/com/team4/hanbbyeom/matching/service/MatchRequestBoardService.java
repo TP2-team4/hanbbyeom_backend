@@ -1,16 +1,13 @@
 package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
-import com.team4.hanbbyeom.matching.dto.MatchRequestDetailResponse;
+import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.DayOfWeek;
+import java.time.*;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,15 +39,17 @@ public class MatchRequestBoardService {
                 .map(row -> new MatchBoardItemResponse(
                         row.getId(),
                         row.getCourseName(),
-                        row.getDistanceMeters(),
+                        row.getDistanceMinMeters(),
+                        row.getDistanceMaxMeters(),
                         row.getTalkLevel(),
-                        row.getScheduledAt(),
+                        row.getScheduledAt().atOffset(ZoneOffset.UTC),
                         row.getPaceMinSec(),
                         row.getPaceMaxSec(),
+                        false, // ⚠️ status='SEARCHING'만 조회하므로 로직상 항상 false (PM 보고 예정)
                         new MatchBoardItemResponse.AuthorSummary(
-                                nicknameByUserId.get(row.getUserId()),
-                                null,   // TODO: 신뢰 프로필 연동
-                                null    // TODO: 신뢰 프로필 연동
+                                row.getAuthorNickname(),
+                                row.getAuthorRating(),
+                                row.getAuthorCompletedCount()
                         )
                 ))
                 .collect(Collectors.toList());
@@ -83,8 +82,7 @@ public class MatchRequestBoardService {
         };
     }
 
-    // users 테이블에서 닉네임만 가볍게 조회 (매칭 도메인이 users를 직접 조인하지 않고 이렇게 분리 조회하는 이유는
-    // Day1에서 정한 "도메인 간 결합도를 낮춘다"는 원칙과 같습니다)
+    // users 테이블에서 닉네임만 가볍게 조회 (도메인 간 결합도를 낮추는 원칙, Day1과 동일)
     private Map<Long, String> fetchNicknames(List<Long> userIds) {
         if (userIds.isEmpty()) return Map.of();
         String inClause = userIds.stream().map(String::valueOf).collect(Collectors.joining(","));
@@ -100,21 +98,22 @@ public class MatchRequestBoardService {
         );
     }
 
-    public MatchRequestDetailResponse getDetail(Long matchRequestId, Long currentUserId) {
+    public MatchRequestResponse getDetail(Long matchRequestId, Long currentUserId) {
         MatchRequestRepository.MatchRequestDetailRow row = matchRequestRepository.findDetailById(matchRequestId)
                 .orElseThrow(() -> new MatchRequestNotFoundException(matchRequestId));
 
         long pendingApplicantCount = matchRequestRepository.countPendingApplicants(matchRequestId);
         String nickname = fetchNicknames(List.of(row.getUserId())).get(row.getUserId());
 
-        return new MatchRequestDetailResponse(
+        return new MatchRequestResponse(
                 row.getId(),
                 row.getCourseName(),
-                row.getDistanceMeters(),
+                row.getDistanceMinMeters(),
+                row.getDistanceMaxMeters(),
                 row.getPaceMinSec(),
                 row.getPaceMaxSec(),
                 row.getMeetingPoint(),
-                row.getScheduledAt(),
+                row.getScheduledAt().atOffset(ZoneOffset.UTC),
                 row.getTalkLevel(),
                 row.getStatus(),
                 row.getUserId().equals(currentUserId),

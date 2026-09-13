@@ -2,7 +2,7 @@ package com.team4.hanbbyeom.matching.dto;
 
 import java.time.OffsetDateTime;
 
-public record MatchRequestDetailResponse(
+public record MatchRequestResponse(
         Long id,
         String courseName,
         Integer distanceMinMeters,

@@ -1,7 +1,7 @@
 package com.team4.hanbbyeom.matching.controller;
 
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
-import com.team4.hanbbyeom.matching.dto.MatchRequestDetailResponse;
+import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 
 @RestController
-@RequestMapping("/api/match-requests")
+@RequestMapping("/api/matching/requests")
 public class MatchRequestController {
 
     private final MatchRequestCommandService matchRequestCommandService;
@@ -29,11 +29,11 @@ public class MatchRequestController {
             @RequestHeader("X-USER-ID") Long currentUserId
     ) {
         Long id = matchRequestCommandService.create(currentUserId, request);
-        return ResponseEntity.created(URI.create("/api/match-requests/" + id)).build();
+        return ResponseEntity.created(URI.create("/api/matching/requests/" + id)).build();
     }
 
     @GetMapping("/{id}")
-    public MatchRequestDetailResponse getDetail(
+    public MatchRequestResponse getDetail(
             @PathVariable Long id,
             @RequestHeader("X-USER-ID") Long currentUserId
     ) {

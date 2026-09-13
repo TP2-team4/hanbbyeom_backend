@@ -14,9 +14,6 @@ public class MatchRequest {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "run_match_condition_id", nullable = false)
-    private Long runMatchConditionId;
-
     @Column(name = "activity_type", nullable = false, length = 10)
     private String activityType = "RUN";
 
@@ -42,10 +39,9 @@ public class MatchRequest {
 
     protected MatchRequest() {}
 
-    public MatchRequest(Long userId, Long runMatchConditionId, OffsetDateTime scheduledAt,
-                        TalkLevel talkLevel, OffsetDateTime searchExpiresAt) {
+    public MatchRequest(Long userId, OffsetDateTime scheduledAt, TalkLevel talkLevel,
+                        OffsetDateTime searchExpiresAt) {
         this.userId = userId;
-        this.runMatchConditionId = runMatchConditionId;
         this.scheduledAt = scheduledAt;
         this.talkLevel = talkLevel;
         this.searchExpiresAt = searchExpiresAt;
@@ -55,7 +51,6 @@ public class MatchRequest {
 
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
-    public Long getRunMatchConditionId() { return runMatchConditionId; }
     public String getActivityType() { return activityType; }
     public OffsetDateTime getScheduledAt() { return scheduledAt; }
     public TalkLevel getTalkLevel() { return talkLevel; }

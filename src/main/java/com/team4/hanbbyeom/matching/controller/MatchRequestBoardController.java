@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/match-requests")
+@RequestMapping("/api/matching/board")
 public class MatchRequestBoardController {
 
     private final MatchRequestBoardService matchRequestBoardService;
@@ -18,13 +18,13 @@ public class MatchRequestBoardController {
 
     @GetMapping
     public List<MatchBoardItemResponse> getBoard(
-            @RequestParam(required = false) String region,
+            @RequestParam(required = false) String course,
             @RequestParam(required = false) String talkLevel,
             @RequestParam(required = false) Integer minDistance,
             @RequestParam(required = false) Integer maxDistance,
             @RequestParam(required = false) String datePreset, // "TODAY" | "TOMORROW" | "WEEKEND"
             @RequestHeader("X-USER-ID") Long currentUserId // TODO: 담당 A 인증 방식으로 교체
     ) {
-        return matchRequestBoardService.getBoard(region, talkLevel, minDistance, maxDistance, datePreset, currentUserId);
+        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, datePreset, currentUserId);
     }
 }

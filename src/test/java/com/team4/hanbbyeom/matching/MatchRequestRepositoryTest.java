@@ -25,6 +25,7 @@ class MatchRequestRepositoryTest {
     private JdbcTemplate jdbcTemplate;
 
     private Long testUserId;
+    private Long testCourseId;
     private Long testRunMatchConditionId;
 
     @BeforeEach
@@ -38,13 +39,9 @@ class MatchRequestRepositoryTest {
                 Long.class
         );
 
-        testRunMatchConditionId = jdbcTemplate.queryForObject(
-                """
-                INSERT INTO run_match_condition (course_name, distance_meters, pace_min_sec, pace_max_sec, meeting_point, region)
-                VALUES ('뚝섬 한강공원', 8000, 360, 400, '뚝섬유원지역 3번 출구', '뚝섬 한강공원')
-                RETURNING id
-                """,
-                Long.class
+        testCourseId = jdbcTemplate.queryForObject(
+                "INSERT INTO running_course (name) VALUES (?) RETURNING id",
+                Long.class, "뚝섬 한강공원"
         );
     }
 
@@ -52,7 +49,6 @@ class MatchRequestRepositoryTest {
     void 저장하고_아이디로_다시_조회할_수_있다() {
         MatchRequest request = new MatchRequest(
                 testUserId,
-                testRunMatchConditionId,
                 OffsetDateTime.now().plusDays(1),
                 TalkLevel.SILENT,
                 OffsetDateTime.now().plusHours(12)

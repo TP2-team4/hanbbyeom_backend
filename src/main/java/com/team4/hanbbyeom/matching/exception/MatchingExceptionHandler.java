@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.exception;
 
+import com.team4.hanbbyeom.matching.dto.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -28,6 +29,10 @@ public class MatchingExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
-}
 
-record ErrorResponse(String message) {}
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT) // 409
+                .body(new ErrorResponse(e.getMessage()));
+    }
+}
