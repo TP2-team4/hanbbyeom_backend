@@ -98,6 +98,12 @@ jwt:
   access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION:30m}
   refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:7d}
 
+# 이메일 인증 코드 해시(HMAC-SHA256)에 사용할 서버 전용 비밀키
+# DB만 유출된 경우 이 키가 없으면 인증 코드를 역산할 수 없도록 함
+email:
+  verification:
+    hmac-secret-base64: ${EMAIL_VERIFICATION_HMAC_SECRET_BASE64}
+
 app:
   cors:
     # 브라우저에서 백엔드 API 호출을 허용할 프론트엔드 주소 목록
