@@ -58,31 +58,31 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage())); // 2번과 동일한 이유로 e.getMessage()를 그대로 노출
     }
 
-    // 5. 매칭 도메인의 잘못된 요청 값 처리
+    // 4. 매칭 도메인의 잘못된 요청 값 처리
     @ExceptionHandler(InvalidMatchRequestException.class)
     public ResponseEntity<ErrorResponse> handleInvalidMatchRequest(InvalidMatchRequestException e) {
         return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
     }
 
-    // 6. 이미 활성 매칭 요청(게시글)이 있는 상태에서 새로 생성을 시도할 때
+    // 5. 이미 활성 매칭 요청(게시글)이 있는 상태에서 새로 생성을 시도할 때
     @ExceptionHandler(AlreadyHasActiveMatchRequestException.class)
     public ResponseEntity<ErrorResponse> handleAlreadyHasActiveMatchRequest(AlreadyHasActiveMatchRequestException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 7. 존재하지 않는 매칭 요청(게시글) 조회/수정/취소 시도
+    // 6. 존재하지 않는 매칭 요청(게시글) 조회/수정/취소 시도
     @ExceptionHandler(MatchRequestNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleMatchRequestNotFound(MatchRequestNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 8. 본인 소유가 아닌 리소스에 접근을 시도할 때
+    // 7. 본인 소유가 아닌 리소스에 접근을 시도할 때
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 9. 예상하지 못한 예외를 처리하는 최종 핸들러
+    // 8. 예상하지 못한 예외를 처리하는 최종 핸들러
     // 위 세 핸들러 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
     // 2·3번과 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음
