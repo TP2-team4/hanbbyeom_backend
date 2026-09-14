@@ -16,6 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 // Spring Security 요청 인가 설정
 // 인증 관련 API                /api/auth/**       누구나 접근 가능
+// 러닝 코스 조회 API            /api/run/courses    누구나 접근 가능
 // 스웨거 UI                   /swagger-ui/**      누구나 접근 가능
 // 스웨거 API 명세 데이터 제공    /v3/api-docs/**     누구나 접근 가능
 // 오류 최종 처리 에러 경로       /error              누구나 접근 가능
@@ -50,6 +51,7 @@ public class SecurityConfig {
                         // requestMatchers(...): 이 URL 패턴에 해당하는 요청을 선택
                         // permitAll(): 인증 여부와 관계없이 모두 접근 허용
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/run/courses").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // 검증 실패 등으로 발생한 예외를 Spring이 내부적으로 /error로 전달(forward)하는데,
                         // 이 경로가 허용되지 않으면 GlobalExceptionHandler가 만든 400 응답이 403으로 바뀌어버림
