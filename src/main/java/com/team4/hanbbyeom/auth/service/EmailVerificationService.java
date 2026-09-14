@@ -138,6 +138,27 @@ public class EmailVerificationService {
                 .orElse(false);
     }
 
+    // 이 이메일이 해당 목적으로 실제 인증에 성공한 시각을 반환하는 메서드
+    // #2 회원가입 Service가 User.emailVerifiedAt에 정확한 인증 시각을 기록하기 위해 사용
+    @Transactional(readOnly = true)
+    public Instant getVerifiedAt(String rawEmail, VerificationPurpose purpose) {
+        String email = normalize(rawEmail); // 이메일 정규화
+
+        return emailVerificationRepository
+                // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증기록 1개를 가져옴(optional)
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        email,
+                        purpose
+                )
+                // 인증기록에 verifiedAt(실제 인증성공 시각)이 있으면 가져옴(optional)
+                .map(verification -> verification.getVerifiedAt())
+                // verifiedAt이 null이면(아직 인증 안 됨) Optional을 빈 상태로 만듦
+                .filter(verifiedAt -> verifiedAt != null)
+                // 위 과정을 거치고도 값이 비어있으면(기록 자체가 없거나, 있어도 미인증) 예외를 던짐
+                // (호출 시점엔 이미 인증됐다고 가정하는 상황이라 값이 없는 건 비정상 상태)
+                .orElseThrow(() -> new IllegalStateException("이메일 인증을 먼저 완료해주세요."));
+    }
+
     // 이메일 앞뒤 공백 제거 및 소문자 변환 (users 테이블과 동일한 정규화 규칙)
     private String normalize(String email) {
         return email
