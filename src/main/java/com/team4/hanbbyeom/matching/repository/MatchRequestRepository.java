@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching.repository;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long> {
 
@@ -104,4 +106,6 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getStatus();
         Long getUserId();
     }
+
+    Optional<MatchRequest> findByUserIdAndStatus(Long userId, MatchRequestStatus status);
 }

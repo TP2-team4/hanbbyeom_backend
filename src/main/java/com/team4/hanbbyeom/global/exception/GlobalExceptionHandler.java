@@ -10,6 +10,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
+import com.team4.hanbbyeom.matching.exception.NoActiveMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 
 // 모든 Controller에서 발생하는 예외를 ErrorResponse 형식으로 통일해서 응답
@@ -95,7 +97,19 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("서버 오류가 발생했습니다.")); // 고정된 안전한 메시지만 반환
     }
 
-    // 9. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
+    // 9. 매칭 신청 시 본인 활성 모집글이 없을 때
+    @ExceptionHandler(NoActiveMatchRequestException.class)
+    public ResponseEntity<ErrorResponse> handleNoActiveMatchRequest(NoActiveMatchRequestException e) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 10. 이미 마감/진행 중인 게시글에 신청하거나, 확정된 매칭을 취소하려 할 때
+    @ExceptionHandler(MatchRequestNotSearchingException.class)
+    public ResponseEntity<ErrorResponse> handleMatchRequestNotSearching(MatchRequestNotSearchingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 11. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
     @ExceptionHandler(NotMatchParticipantException.class)
     public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
