@@ -1,5 +1,7 @@
 package com.team4.hanbbyeom.global.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -11,6 +13,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 // (안 열면 Spring이 내부적으로 /error로 전달하는 과정에서 Security에 막혀 403으로 바뀜)
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // Logger: (SLF4J 제공) 로그를 남기는 도구
+    // 로그 레벨(error/warn/info) 구분, 시간·클래스명 자동 기록 등을 지원
+    // getLogger(GlobalExceptionHandler.class):
+    // 이 로그가 어느 클래스에서 찍힌 건지 표시하기 위해 클래스 정보를 넘겨서 이 클래스 전용 Logger 객체를 만듦
+    private static final Logger log = LoggerFactory
+            .getLogger(GlobalExceptionHandler.class);
 
     // 1. @Valid 검증 실패를 처리하는 핸들러
     // 검증 실패 시, 발생한 필드 오류 중 첫 번째 메시지를 응답으로 사용
@@ -60,6 +69,9 @@ public class GlobalExceptionHandler {
     // → 그 내용을 클라이언트에 그대로 보여주면 정보 노출 위험이 있어 고정된 안전한 문구만 반환
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
+        // 클라이언트에는 안전한 문구만 보여주되, 서버 로그에는 어디서 어떤 순서로 예외가 터졌는지 전부 남김
+        log.error("예상하지 못한 예외 발생", e);
+
         return ResponseEntity
                 .internalServerError() // HTTP 상태코드를 500 Internal Server Error로 설정
                 .body(new ErrorResponse("서버 오류가 발생했습니다.")); // 고정된 안전한 메시지만 반환
