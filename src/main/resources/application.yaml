@@ -25,6 +25,7 @@ spring:
       ddl-auto: validate
     properties:
       hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           # DB에 날짜와 시간을 저장할 때 서버 위치와 관계없이 UTC 기준을 사용
           # 사용자에게 보여줄 때는 프론트엔드에서 한국 시간 등 필요한 시간대로 변환
