@@ -11,7 +11,6 @@ public record MatchBoardItemResponse(
         OffsetDateTime scheduledAt,
         Integer paceMinSec,
         Integer paceMaxSec,
-        boolean isApplied,
         AuthorSummary author
 ) {
     public record AuthorSummary(

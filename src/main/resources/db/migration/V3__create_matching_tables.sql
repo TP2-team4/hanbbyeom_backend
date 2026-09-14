@@ -63,8 +63,8 @@ CREATE TABLE match_request (
     -- 활동 유형 값 제한. 지금은 RUN만 허용.
                                CONSTRAINT chk_match_request_type CHECK (activity_type IN ('RUN')),
 
-    -- 대화 수준 값 제한. 프론트엔드 조건 설정 화면의 2개 옵션과 정확히 일치해야 한다.
-                               CONSTRAINT chk_match_request_talk CHECK (talk_level IN ('SILENT', 'LIGHT_CHAT')),
+    -- 대화 수준 값 제한.
+                               CONSTRAINT chk_match_request_talk CHECK (talk_level IN ('SILENT', 'GREETING_ONLY', 'LIGHT_CHAT')),
 
     -- 게시글 상태 값 제한.
                                CONSTRAINT chk_match_request_status CHECK (status IN (
@@ -169,7 +169,7 @@ CREATE TABLE activity_match (
                                 CONSTRAINT fk_activity_match_closed_by FOREIGN KEY (closed_by_user_id) REFERENCES users(id),
 
                                 CONSTRAINT chk_activity_match_type CHECK (activity_type IN ('RUN')),
-                                CONSTRAINT chk_activity_match_talk CHECK (talk_level IN ('SILENT', 'LIGHT_CHAT')),
+                                CONSTRAINT chk_activity_match_talk CHECK (talk_level IN ('SILENT', 'GREETING_ONLY', 'LIGHT_CHAT')),
                                 CONSTRAINT chk_activity_match_status CHECK (status IN (
                                                                                        'PROPOSED', 'CONFIRMED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ENDED'
                                     )),

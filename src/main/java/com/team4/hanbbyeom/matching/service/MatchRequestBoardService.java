@@ -45,7 +45,6 @@ public class MatchRequestBoardService {
                         row.getScheduledAt().atOffset(ZoneOffset.UTC),
                         row.getPaceMinSec(),
                         row.getPaceMaxSec(),
-                        false, // ⚠️ status='SEARCHING'만 조회하므로 로직상 항상 false (PM 보고 예정)
                         new MatchBoardItemResponse.AuthorSummary(
                                 row.getAuthorNickname(),
                                 row.getAuthorRating(),

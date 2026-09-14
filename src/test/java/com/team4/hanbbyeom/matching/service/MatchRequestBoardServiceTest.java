@@ -79,7 +79,6 @@ class MatchRequestBoardServiceTest {
         assertThat(item.courseName()).isEqualTo("뚝섬 한강공원");
         assertThat(item.author().rating()).isEqualTo(4.5);
         assertThat(item.author().completedCount()).isEqualTo(12);
-        assertThat(item.isApplied()).isFalse(); // 이슈 모순 사항 — 항상 false
     }
 
     @Test
