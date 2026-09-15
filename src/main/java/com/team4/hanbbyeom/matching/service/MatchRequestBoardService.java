@@ -23,6 +23,9 @@ public class MatchRequestBoardService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    // 모집 탭 목록 조회 — 읽기 전용이라 상태 전이는 없다. 필터는 전부 선택적(null 허용)이며,
+    // 거리/페이스는 값이 정확히 일치하는 게 아니라 "게시글의 범위와 필터 범위가 겹치는지"로
+    // 판단한다(MatchRequestRepository.searchBoard 참고). currentUserId로 본인 글은 항상 제외된다.
     public List<MatchBoardItemResponse> getBoard(String region, String talkLevel,
                                                  Integer minDistance, Integer maxDistance,
                                                  Integer minPace, Integer maxPace,
@@ -55,7 +58,9 @@ public class MatchRequestBoardService {
                 .collect(Collectors.toList());
     }
 
-    // "오늘"/"내일"/"이번 주말" 같은 프리셋을 실제 날짜 범위로 변환
+    // "오늘"/"내일"/"이번 주말" 같은 프리셋을 실제 날짜 범위로 변환. WEEKEND는 이번 주 토요일이
+    // 이미 지났으면 다음 주 토요일로 넘어가므로, 목요일 밤에 조회해도 "이번 주말"이 항상 미래를
+    // 가리킨다.
     private OffsetDateTime[] resolveDateRange(String datePreset) {
         if (datePreset == null) {
             return new OffsetDateTime[]{null, null};
@@ -98,6 +103,9 @@ public class MatchRequestBoardService {
         );
     }
 
+    // 모집글 상세 조회 — 목록(getBoard)과 달리 meetingPoint까지 포함하고, 조회자가 작성자
+    // 본인인지(isOwner)와 응답 대기 중인 신청자 수(pendingApplicantCount)를 같이 내려줘서
+    // 프론트가 "호스트 전용 화면 요소"를 보여줄지 판단할 수 있게 한다. 읽기 전용, 상태 전이 없음.
     public MatchRequestResponse getDetail(Long matchRequestId, Long currentUserId) {
         MatchRequestRepository.MatchRequestDetailRow row = matchRequestRepository.findDetailById(matchRequestId)
                 .orElseThrow(() -> new MatchRequestNotFoundException(matchRequestId));

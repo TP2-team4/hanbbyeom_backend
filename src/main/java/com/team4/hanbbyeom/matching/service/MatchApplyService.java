@@ -31,6 +31,9 @@ public class MatchApplyService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    // 호스트 게시글에 신청을 넣는 기능. 성공하면 activity_match를 PROPOSED로 새로 만들고,
+    // 호스트 게시글만 PENDING_CONFIRMATION으로 전이한다(신청자는 본인 게시글이 없어도 신청할
+    // 수 있으므로, 있더라도 그 게시글 상태는 건드리지 않는다).
     @Transactional
     public Long apply(Long applicantUserId, Long hostRequestId) {
         // 1) matching_mutex 행을 먼저 잠가서, 동시에 들어온 다른 신청 트랜잭션과 순서를 직렬화
@@ -102,20 +105,30 @@ public class MatchApplyService {
         return activityMatchId;
     }
 
+    // 신청자가 "내가 넣은 신청"을 스스로 철회하는 기능. 호스트가 거절하는 것과 결과(REJECTED)는
+    // 같지만, 주체가 신청자 본인이고 진입점(컨트롤러 경로)이 다르다는 점만 다르다.
+    // ⚠️ 이슈 #23 원문엔 없지만 디자인(14d 화면) 흐름상 필요해서 추가한 기능입니다.
     @Transactional
     public void cancelApplication(Long applicantUserId, Long matchRequestId) {
-        // ⚠️ 이슈 #23 원문엔 없지만 디자인(14d 화면) 흐름상 필요해서 추가한 기능입니다.
+        // 1) apply()와 동일하게 matching_mutex를 먼저 잠근다. 취소 처리 중에 다른 신청/취소
+        //    트랜잭션이 같은 activity_match를 동시에 건드리지 못하게 순서를 직렬화한다.
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
-        // 컨트롤러는 (게시글) matchRequestId만 알고 있으므로, 현재 활성 상태인 activityMatchId를
-        // match_participant에서 역으로 찾는다 — matchRequestId와 activityMatchId는 서로 다른
-        // 시퀀스라 그대로 넘겨 쓰면 안 됨.
+        // 2) 컨트롤러는 (호스트) 게시글 matchRequestId만 알고 있으므로, 현재 활성 상태인
+        //    activityMatchId를 match_participant에서 역으로 찾는다 — matchRequestId와
+        //    activityMatchId는 서로 다른 시퀀스라 그대로 넘겨 쓰면 안 됨.
         Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
                 .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
 
+        // 3) 위에서 찾은 activityMatchId로 실제 ActivityMatch 엔티티를 가져온다.
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
 
+        // 4) 이 매칭에 연결된 참가자 2명(호스트 slot A, 신청자 slot B)을 모두 가져온 뒤,
+        //    - 신청자(slot B) 중 요청자 본인과 일치하는 행을 찾는다. 없으면 "내 신청이 아닌 매칭을
+        //      취소하려는 시도"이므로 차단 — 프론트가 취소 버튼을 숨겨도 API를 직접 호출할 수
+        //      있으므로 서버가 반드시 다시 검증해야 한다.
+        //    - 호스트(slot A) 행도 같이 찾아둔다(6번에서 호스트 게시글 상태 복구에 필요).
         var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
         MatchParticipant applicant = participants.stream()
                 .filter(p -> "B".equals(p.getSlot()) && p.getUserId().equals(applicantUserId))
@@ -126,17 +139,22 @@ public class MatchApplyService {
                 .findFirst()
                 .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
 
+        // 5) 이미 호스트가 수락/거절했거나(CONFIRMED/REJECTED), 자동 만료·종료된 매칭은
+        //    취소할 대상이 아니므로 PROPOSED(응답 대기 중) 상태일 때만 취소를 허용한다.
         if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
             throw new MatchRequestNotSearchingException("이미 확정되었거나 종료된 매칭은 취소할 수 없어요.");
         }
 
+        // 6) activity_match를 REJECTED로 전이시킨다 — 별도의 CANCELLED 처리를 새로 만들지 않고
+        //    호스트 거절과 같은 reject()를 재사용한다("제안이 무산됨"이라는 결과는 동일하므로).
         activityMatch.reject(applicantUserId); // REJECTED 재사용 — 신청자 취소도 "제안이 무산됨"이라는 점은 동일
 
+        // 7) 호스트 게시글은 다시 모집 중(SEARCHING)으로 되돌려서 다른 사람이 신청할 수 있게 한다.
         MatchRequest hostRequest = matchRequestRepository.findById(host.getMatchRequestId())
                 .orElseThrow(() -> new MatchRequestNotFoundException(host.getMatchRequestId()));
         hostRequest.changeStatus(MatchRequestStatus.SEARCHING);
 
-        // 신청자는 본인 게시글 없이 신청했을 수 있음(matchRequestId가 null) — 있을 때만 되돌린다.
+        // 8) 신청자는 본인 게시글 없이 신청했을 수 있음(matchRequestId가 null) — 있을 때만 되돌린다.
         Long applicantMatchRequestId = applicant.getMatchRequestId();
         if (applicantMatchRequestId != null) {
             MatchRequest applicantRequest = matchRequestRepository.findById(applicantMatchRequestId)
