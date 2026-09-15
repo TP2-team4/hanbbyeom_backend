@@ -9,8 +9,9 @@ import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestExcept
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
+import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
+import com.team4.hanbbyeom.run.service.RunConditionService;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,17 +21,16 @@ import java.time.OffsetDateTime;
 @Service
 public class MatchRequestCommandService {
 
-    // V3 SQL의 chk_match_request_time 제약: created_at < search_expires_at < scheduled_at
-    // 이 두 상수 관계가 깨지면(MIN_LEAD_HOURS <= SEARCH_WINDOW_HOURS) DB 제약을 절대 통과 못 하니 주의하세요.
-    private static final long MIN_LEAD_HOURS = 3;       // "지금부터 최소 3시간 뒤"
-    private static final long SEARCH_WINDOW_HOURS = 1;  // "시작 1시간 전에 모집 마감"
+    private static final long MIN_LEAD_HOURS = 3;
+    private static final long SEARCH_WINDOW_HOURS = 1;
 
     private final MatchRequestRepository matchRequestRepository;
-    private final JdbcTemplate jdbcTemplate;
+    private final RunConditionService runConditionService; // 새로 주입
 
-    public MatchRequestCommandService(MatchRequestRepository matchRequestRepository, JdbcTemplate jdbcTemplate) {
+    public MatchRequestCommandService(MatchRequestRepository matchRequestRepository,
+                                      RunConditionService runConditionService) {
         this.matchRequestRepository = matchRequestRepository;
-        this.jdbcTemplate = jdbcTemplate;
+        this.runConditionService = runConditionService;
     }
 
     @Transactional
@@ -49,21 +49,22 @@ public class MatchRequestCommandService {
         try {
             matchRequestId = matchRequestRepository.save(matchRequest).getId();
         } catch (DataIntegrityViolationException e) {
-            // uq_match_request_active_user 위반: 이미 활성 게시글/신청이 있는 사용자
             throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 모집글 또는 신청이 있어요.");
         }
 
-        // match_request가 먼저 커밋 대기 상태로 존재해야 이 INSERT의 FK(match_request_id)가 통과함
-        jdbcTemplate.update(
-                """
-                INSERT INTO run_match_condition
-                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                matchRequestId, request.courseId(), request.meetingPoint(),
-                request.distanceMinMeters(), request.distanceMaxMeters(),
-                request.paceMinSec(), request.paceMaxSec()
-        );
+        // 코스·거리·페이스·만나는 곳 4개는 B의 RunConditionService가 검증(범위/코스 존재 여부)과
+        // 저장까지 전담. C는 더 이상 raw SQL로 직접 run_match_condition에 쓰지 않음.
+        // matchRequest가 IDENTITY 전략이라 save() 시점에 이미 INSERT가 실행돼 있고,
+        // 같은 트랜잭션(같은 영속성 컨텍스트)이라 아래 호출의 findById()가 바로 찾아냄 — flush 필요 없음.
+        runConditionService.create(userId, new RunConditionCreateRequest(
+                matchRequestId,
+                request.courseId(),
+                request.meetingPoint(),
+                request.distanceMinMeters(),
+                request.distanceMaxMeters(),
+                request.paceMinSec(),
+                request.paceMaxSec()
+        ));
 
         return matchRequestId;
     }
@@ -73,11 +74,6 @@ public class MatchRequestCommandService {
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "수정");
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);
-
-        // 담당 범위: C(이 메서드) = scheduledAt, talkLevel / B(#16 별도 API) = courseId, meetingPoint,
-        // distanceMinMeters/MaxMeters, paceMinSec/MaxSec.
-        // 코스·거리·페이스·만나는 곳은 이 메서드가 검증 없이 같이 덮어쓰고 있었던 버그였음 —
-        // run_match_condition에 대한 UPDATE를 여기서 완전히 제거하고, 팀원B의 #16 API가 전담하도록 함.
         matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
     }
 

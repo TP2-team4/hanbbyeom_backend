@@ -56,7 +56,8 @@ public class MatchApplyService {
         // 4) 호스트의 run_match_condition + running_course 조회 (코스명/거리/페이스/만나는 곳)
         Map<String, Object> condition = jdbcTemplate.queryForMap(
                 """
-                SELECT rc.meeting_point, rc.distance_min_meters, rc.pace_min_sec, rc.pace_max_sec,
+                SELECT rc.meeting_point, rc.distance_min_meters, rc.distance_max_meters,
+                       rc.pace_min_sec, rc.pace_max_sec,
                        co.name AS course_name, co.route_description
                 FROM run_match_condition rc
                 JOIN running_course co ON co.id = rc.course_id
@@ -65,7 +66,8 @@ public class MatchApplyService {
                 hostRequestId
         );
 
-        Integer distanceMeters = (Integer) condition.get("distance_min_meters"); // 호스트의 하한값 사용 (확인 필요)
+        Integer distanceMinMeters = (Integer) condition.get("distance_min_meters");
+        Integer distanceMaxMeters = (Integer) condition.get("distance_max_meters");
         Integer paceMinSec = (Integer) condition.get("pace_min_sec");
         Integer paceMaxSec = (Integer) condition.get("pace_max_sec");
         String meetingPoint = (String) condition.get("meeting_point");
@@ -85,7 +87,7 @@ public class MatchApplyService {
         // 5) activity_match 생성 (PROPOSED)
         ActivityMatch activityMatch = new ActivityMatch(
                 scheduledAt, scheduledEndAt, hostRequest.getTalkLevel(),
-                meetingPoint, courseName, distanceMeters, routeDescription,
+                meetingPoint, courseName, distanceMinMeters, distanceMaxMeters, routeDescription,
                 paceMinSec, paceMaxSec, decisionExpiresAt
         );
         Long activityMatchId = activityMatchRepository.save(activityMatch).getId();
@@ -106,9 +108,15 @@ public class MatchApplyService {
     }
 
     @Transactional
-    public void cancelApplication(Long applicantUserId, Long activityMatchId) {
+    public void cancelApplication(Long applicantUserId, Long matchRequestId) {
         // ⚠️ 이슈 #23 원문엔 없지만 디자인(14d 화면) 흐름상 필요해서 추가한 기능입니다.
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        // 컨트롤러는 (게시글) matchRequestId만 알고 있으므로, 현재 활성 상태인 activityMatchId를
+        // match_participant에서 역으로 찾는다 — matchRequestId와 activityMatchId는 서로 다른
+        // 시퀀스라 그대로 넘겨 쓰면 안 됨.
+        Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
+                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
 
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
