@@ -1,20 +1,14 @@
 package com.team4.hanbbyeom.global.exception;
 
+import com.team4.hanbbyeom.matching.exception.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestException;
-import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
-import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
-import com.team4.hanbbyeom.matching.exception.NoActiveMatchRequestException;
-import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 
 // 모든 Controller에서 발생하는 예외를 ErrorResponse 형식으로 통일해서 응답
 // 전제조건: SecurityConfig에서 /error 경로를 permitAll로 열어둬야 함
@@ -88,14 +82,32 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 7. 본인 소유가 아닌 리소스에 접근을 시도할 때
+    // 7. 매칭 신청 시 본인 활성 모집글이 없을 때
+    @ExceptionHandler(NoActiveMatchRequestException.class)
+    public ResponseEntity<ErrorResponse> handleNoActiveMatchRequest(NoActiveMatchRequestException e) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 8. 이미 마감/진행 중인 게시글에 신청하거나, 확정된 매칭을 취소하려 할 때
+    @ExceptionHandler(MatchRequestNotSearchingException.class)
+    public ResponseEntity<ErrorResponse> handleMatchRequestNotSearching(MatchRequestNotSearchingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 9. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
+    @ExceptionHandler(NotMatchParticipantException.class)
+    public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 10. 본인 소유가 아닌 리소스에 접근을 시도할 때
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 8. 예상하지 못한 예외를 처리하는 최종 핸들러
-    // 위 세 핸들러 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
+    // 11. 예상하지 못한 예외를 처리하는 최종 핸들러
+    // 위 핸들러들 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
     // 2·3번과 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음
     // → 그 내용을 클라이언트에 그대로 보여주면 정보 노출 위험이 있어 고정된 안전한 문구만 반환
@@ -107,23 +119,5 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .internalServerError() // HTTP 상태코드를 500 Internal Server Error로 설정
                 .body(new ErrorResponse("서버 오류가 발생했습니다.")); // 고정된 안전한 메시지만 반환
-    }
-
-    // 9. 매칭 신청 시 본인 활성 모집글이 없을 때
-    @ExceptionHandler(NoActiveMatchRequestException.class)
-    public ResponseEntity<ErrorResponse> handleNoActiveMatchRequest(NoActiveMatchRequestException e) {
-        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
-    }
-
-    // 10. 이미 마감/진행 중인 게시글에 신청하거나, 확정된 매칭을 취소하려 할 때
-    @ExceptionHandler(MatchRequestNotSearchingException.class)
-    public ResponseEntity<ErrorResponse> handleMatchRequestNotSearching(MatchRequestNotSearchingException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(e.getMessage()));
-    }
-
-    // 11. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
-    @ExceptionHandler(NotMatchParticipantException.class)
-    public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 }
