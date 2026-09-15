@@ -22,6 +22,8 @@ public class ActivityMatchController {
         this.trustProfileLookupService = trustProfileLookupService;
     }
 
+    // activityMatchId에 신청한 사람(slot B)의 신뢰도 프로필 조회 — 이 매칭의 호스트(slot A)
+    // 본인만 조회 가능(제3자·신청자 본인도 차단). 아직 신청자가 없으면(slot B 없음) 예외.
     @GetMapping("/{activityMatchId}/applicant-profile")
     public TrustProfileResponse getApplicantProfile(
             @PathVariable Long activityMatchId,

@@ -15,8 +15,9 @@ public class TrustProfileLookupService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // userId에 해당하는 trust_profile이 없으면(아직 아무 활동도 안 한 신규 유저 등)
-    // 기본값(0, null)으로 응답합니다 — 이슈 #22의 명시적 요구사항입니다.
+    // 호스트/신청자 프로필 미리보기(호스트 프로필 조회, 신청자 프로필 조회)에서 공용으로 쓰는
+    // 조회 전용 메서드 — 상태 전이 없음. userId에 해당하는 trust_profile이 없으면(아직 아무
+    // 활동도 안 한 신규 유저 등) 기본값(0, null)으로 응답합니다 — 이슈 #22의 명시적 요구사항입니다.
     public TrustProfileResponse lookup(Long userId) {
         List<TrustProfileResponse> rows = jdbcTemplate.query(
                 """
