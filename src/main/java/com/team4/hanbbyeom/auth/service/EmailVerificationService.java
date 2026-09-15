@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.auth.service;
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
+import com.team4.hanbbyeom.global.util.EmailNormalizer;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage; // HTML, 이미지, 첨부파일, 인라인 이미지 등을 포함하는 복잡한 이메일 표현 가능
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64; // Base64 문자열 ↔ 바이트 배열 변환
 import java.util.HexFormat;
-import java.util.Locale;
 
 // 이메일 인증 코드 생성, 저장, 발송을 담당하는 Service
 @Service
@@ -56,7 +56,7 @@ public class EmailVerificationService {
     // 인증 코드 생성, 해시 저장, 메일 발송을 한 번에 처리
     @Transactional
     public void sendVerificationCode(String rawEmail, VerificationPurpose purpose) {
-        String email = normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
+        String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
         validateResendInterval(email, purpose);
 
@@ -83,7 +83,7 @@ public class EmailVerificationService {
     // 이메일 인증 코드 확인: 사용 여부·만료·시도 횟수 검증 후 코드 일치 여부 확인
     @Transactional
     public void confirmCode(String rawEmail, VerificationPurpose purpose, String rawCode) {
-        String email = normalize(rawEmail);
+        String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
         // 이메일+목적으로 가장 최근에 생성된 인증 기록만 유효한 확인 대상으로 조회
         EmailVerification verification = emailVerificationRepository
@@ -125,7 +125,7 @@ public class EmailVerificationService {
     // 이 이메일이 전달받은 목적에 대해 가장 최근 인증 요청 기준으로 인증 완료됐는지 확인하는 메서드
     // #2 회원가입 Service가 가입 완료 처리 전에 호출해서 사용
     public boolean isVerified(String rawEmail, VerificationPurpose purpose) {
-        String email = normalize(rawEmail); // 이메일 정규화
+        String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
         return emailVerificationRepository
                 // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증 기록 1개를 가져옴
@@ -142,7 +142,7 @@ public class EmailVerificationService {
     // #2 회원가입 Service가 User.emailVerifiedAt에 정확한 인증 시각을 기록하기 위해 사용
     @Transactional(readOnly = true)
     public Instant getVerifiedAt(String rawEmail, VerificationPurpose purpose) {
-        String email = normalize(rawEmail); // 이메일 정규화
+        String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
         return emailVerificationRepository
                 // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증기록 1개를 가져옴(optional)
@@ -157,13 +157,6 @@ public class EmailVerificationService {
                 // 위 과정을 거치고도 값이 비어있으면(기록 자체가 없거나, 있어도 미인증) 예외를 던짐
                 // (호출 시점엔 이미 인증됐다고 가정하는 상황이라 값이 없는 건 비정상 상태)
                 .orElseThrow(() -> new IllegalStateException("이메일 인증을 먼저 완료해주세요."));
-    }
-
-    // 이메일 앞뒤 공백 제거 및 소문자 변환 (users 테이블과 동일한 정규화 규칙)
-    private String normalize(String email) {
-        return email
-                .trim() // 앞뒤 공백 제거
-                .toLowerCase(Locale.ROOT); // 소문자로 변환
     }
 
     // 60초 재발송 제한을 검사하는 메서드

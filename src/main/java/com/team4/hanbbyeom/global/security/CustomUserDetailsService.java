@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.global.security;
 
+import com.team4.hanbbyeom.global.util.EmailNormalizer;
 import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -7,7 +8,6 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-import java.util.Locale;
 
 // UserDetailsService: (Spring Security 제공) 식별자로 사용자를 찾아오는 방법을 정의하는 인터페이스
 // Spring은 언제 부를지만 알고, 어디서 어떻게 찾을지는 이 파일에서 우리가 정함(프로젝트마다 다르므로)
@@ -31,7 +31,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     // 파라미터 이름이 username이지만 우리 서비스의 로그인 식별자는 이메일
     @Override
     public CustomUserDetails loadUserByUsername(String email) {
-        String normalizedEmail = normalize(email); // 이메일 정규화
+        String normalizedEmail = EmailNormalizer.normalize(email); // 이메일 정규화(공백 제거 후 소문자로)
 
         // 탈퇴하지 않은 사용자만 조회
         User user = userRepository.findByEmailAndDeletedAtIsNull(normalizedEmail)
@@ -41,12 +41,5 @@ public class CustomUserDetailsService implements UserDetailsService {
         // DaoAuthenticationProvider가 getPassword()·getAuthorities() 등을 호출하는데
         // User Entity에는 그런 메서드가 없어 그대로는 넘길 수 없음
         return new CustomUserDetails(user);
-    }
-
-    // 이메일 앞뒤 공백 제거 및 소문자 변환
-    private String normalize(String email) {
-        return email
-                .trim()
-                .toLowerCase(Locale.ROOT);
     }
 }

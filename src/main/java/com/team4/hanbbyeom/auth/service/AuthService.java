@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.auth.service;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.dto.SignUpRequest;
 import com.team4.hanbbyeom.auth.dto.SignUpResponse;
+import com.team4.hanbbyeom.global.util.EmailNormalizer;
 import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -11,7 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Locale;
 
 // 회원가입, 로그인 등 인증 관련 비즈니스 로직을 담당하는 Service
 @Service
@@ -26,7 +26,7 @@ public class AuthService {
     @Transactional
     // SignUpRequest: 이메일, 비밀번호, 닉네임을 하나로 묶어놓은 객체
     public SignUpResponse signUp(SignUpRequest request) {
-        String email = normalize(request.email()); // 이메일 정규화
+        String email = EmailNormalizer.normalize(request.email()); // 이메일 정규화(공백 제거 후 소문자로)
 
         // 탈퇴하지 않은 동일 이메일 사용자가 이미 있는지 확인 (중복차단)
         if (userRepository.existsByEmailAndDeletedAtIsNull(email)) {
@@ -52,12 +52,5 @@ public class AuthService {
         // User에서 비밀번호만 빼고 반환함
         return SignUpResponse // passwordHash가 빠진 응답 전용 DTO
                 .from(savedUser); // (SignUpResponse에서 만듦) savedUser를 SignUpResponse로 변환
-    }
-
-    // 이메일 앞뒤 공백 제거 및 소문자 변환 (users 테이블과 동일한 정규화 규칙)
-    private String normalize(String email) {
-        return email
-                .trim()
-                .toLowerCase(Locale.ROOT);
     }
 }
