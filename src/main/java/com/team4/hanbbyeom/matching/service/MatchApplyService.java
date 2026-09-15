@@ -47,13 +47,7 @@ public class MatchApplyService {
             throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
         }
 
-        // 3) 신청자 본인의 활성(SEARCHING) 모집글이 있는지 확인 — match_participant의 FK 제약상 필수
-        MatchRequest applicantRequest = matchRequestRepository
-                .findByUserIdAndStatus(applicantUserId, MatchRequestStatus.SEARCHING)
-                .orElseThrow(() -> new NoActiveMatchRequestException(
-                        "먼저 본인의 모집 조건을 등록해야 다른 사람 글에 신청할 수 있어요."));
-
-        // 4) 호스트의 run_match_condition + running_course 조회 (코스명/거리/페이스/만나는 곳)
+        // 3) 호스트의 run_match_condition + running_course 조회 (코스명/거리/페이스/만나는 곳)
         Map<String, Object> condition = jdbcTemplate.queryForMap(
                 """
                 SELECT rc.meeting_point, rc.distance_min_meters, rc.distance_max_meters,
@@ -84,7 +78,7 @@ public class MatchApplyService {
             throw new InvalidMatchRequestException("활동 시작 시각이 너무 임박해서 신청할 수 없어요.");
         }
 
-        // 5) activity_match 생성 (PROPOSED)
+        // 4) activity_match 생성 (PROPOSED)
         ActivityMatch activityMatch = new ActivityMatch(
                 scheduledAt, scheduledEndAt, hostRequest.getTalkLevel(),
                 meetingPoint, courseName, distanceMinMeters, distanceMaxMeters, routeDescription,
@@ -92,17 +86,18 @@ public class MatchApplyService {
         );
         Long activityMatchId = activityMatchRepository.save(activityMatch).getId();
 
-        // 6) match_participant 2건 생성 — 호스트(A, PENDING), 신청자(B, ACCEPTED)
+        // 5) match_participant 2건 생성 — 호스트(A, PENDING), 신청자(B, ACCEPTED)
+        // 신청자는 본인 게시글 없이도 신청할 수 있으므로 matchRequestId를 null로 저장한다
+        // (match_participant.match_request_id는 V11에서 nullable로 변경됨).
         matchParticipantRepository.save(new MatchParticipant(
                 activityMatchId, hostRequestId, hostRequest.getUserId(), "A", AcceptStatus.PENDING
         ));
         matchParticipantRepository.save(new MatchParticipant(
-                activityMatchId, applicantRequest.getId(), applicantUserId, "B", AcceptStatus.ACCEPTED
+                activityMatchId, null, applicantUserId, "B", AcceptStatus.ACCEPTED
         ));
 
-        // 7) 양쪽 match_request 상태 전이 (호스트 + 신청자 둘 다)
+        // 6) 호스트 게시글만 상태 전이 (신청자는 본인 게시글이 없을 수 있어 건드리지 않음)
         hostRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
-        applicantRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
 
         return activityMatchId;
     }
@@ -139,11 +134,14 @@ public class MatchApplyService {
 
         MatchRequest hostRequest = matchRequestRepository.findById(host.getMatchRequestId())
                 .orElseThrow(() -> new MatchRequestNotFoundException(host.getMatchRequestId()));
-        MatchRequest applicantRequest = matchRequestRepository.findById(applicant.getMatchRequestId())
-                .orElseThrow(() -> new MatchRequestNotFoundException(applicant.getMatchRequestId()));
-
-        // 취소 전이라 두 게시글 모두 SEARCHING으로 되돌림
         hostRequest.changeStatus(MatchRequestStatus.SEARCHING);
-        applicantRequest.changeStatus(MatchRequestStatus.SEARCHING);
+
+        // 신청자는 본인 게시글 없이 신청했을 수 있음(matchRequestId가 null) — 있을 때만 되돌린다.
+        Long applicantMatchRequestId = applicant.getMatchRequestId();
+        if (applicantMatchRequestId != null) {
+            MatchRequest applicantRequest = matchRequestRepository.findById(applicantMatchRequestId)
+                    .orElseThrow(() -> new MatchRequestNotFoundException(applicantMatchRequestId));
+            applicantRequest.changeStatus(MatchRequestStatus.SEARCHING);
+        }
     }
 }
