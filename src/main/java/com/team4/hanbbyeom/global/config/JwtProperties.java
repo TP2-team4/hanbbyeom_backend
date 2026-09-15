@@ -25,7 +25,6 @@ import java.time.Duration;
 public record JwtProperties(
         String secretBase64, // 토큰 서명용 비밀키 (.env의 JWT_SECRET_BASE64)
         String issuer, // 토큰 발급자 이름 (application.yaml에 "hanbbyeom"으로 고정)
-        Duration accessTokenExpiration, // Access Token 유효기간
-        Duration refreshTokenExpiration // Refresh Token 유효기간
+        Duration accessTokenExpiration // Access Token 유효기간
 ) {
 }

@@ -9,7 +9,6 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 
@@ -54,28 +53,9 @@ public class JwtTokenProvider {
 
 
     // Access Token 생성 (로그인 성공 시 발급, 짧은 만료시간)
-    // 실제 JWT 만드는 로직은 둘 다 공통으로 createToken()에 맡기고, 여기서는 어떤 만료시간을 쓸지만 다르게 전달
-    public String createAccessToken(Long userId) {
-        return createToken(
-                userId, // Access Token을 만들 사용자 Id
-                jwtProperties.accessTokenExpiration() // 설정 파일에서 읽어온 Access Token의 유효시간
-        );
-    }
-
-    // Refresh Token 생성 (Access Token 재발급용, 긴 만료시간)
-    // 실제 JWT 만드는 로직은 둘 다 공통으로 createToken()에 맡기고, 여기서는 어떤 만료시간을 쓸지만 다르게 전달
-    public String createRefreshToken(Long userId) {
-        return createToken(
-                userId, // Refresh Token을 만들 사용자 Id
-                jwtProperties.refreshTokenExpiration() // 설정 파일에서 읽어온 Refresh Token의 유효시간
-        );
-    }
-
-
-    // userId와 유효시간을 받아 JWT 문자열을 생성하는 메서드
-    private String createToken(
-            Long userId, // 토큰을 발급받는 사용자 Id
-            Duration validity // 이 토큰을 얼마 동안 유효하게 할지 나타내는 시간 길이
+    // userId를 받아 서명된 JWT 문자열을 생성
+    public String createAccessToken(
+            Long userId // 토큰을 발급받는 사용자 Id
     ) {
         Instant now = Instant.now(); // 현재 시각 가져옴 (발급시각, 만료시각 계산에 사용)
 
@@ -95,8 +75,8 @@ public class JwtTokenProvider {
                 .issuedAt(Date.from(now))
 
                 // JWT의 Expiration(exp: 이 토큰이 언제 만료되는지) Claim으로 저장
-                // 현재 시간 + 토큰 유효시간
-                .expiration(Date.from(now.plus(validity)))
+                // 현재 시각 + 설정 파일에서 읽어온 Access Token의 유효시간
+                .expiration(Date.from(now.plus(jwtProperties.accessTokenExpiration())))
 
                 // signWith: 지금까지 만든 JWT에 SecretKey를 이용해서 서명(Signature)
                 .signWith(secretKey)
