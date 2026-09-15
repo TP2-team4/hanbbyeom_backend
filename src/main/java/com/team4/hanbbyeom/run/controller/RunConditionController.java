@@ -57,4 +57,16 @@ public class RunConditionController {
         // HTTP Status 204 No Content 응답을 반환 (수정 성공 시 본문 없음)
         return ResponseEntity.noContent().build();
     }
+
+    @Operation(summary = "러닝 조건 삭제 (매칭 취소)")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @RequestHeader("X-USER-ID") Long currentUserId
+    ) {
+        // 서비스 계층을 호출하여 러닝 조건 삭제 및 매칭 요청 취소 비즈니스 로직을 수행
+        runConditionService.delete(currentUserId, id);
+        // HTTP Status 204 No Content 응답을 반환 (삭제 성공 시 본문 없음)
+        return ResponseEntity.noContent().build();
+    }
 }
