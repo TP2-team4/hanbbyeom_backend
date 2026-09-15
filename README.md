@@ -13,6 +13,10 @@
 
 러닝 코스, 시간, 페이스, 대화 정도를 기반으로 한 러닝메이트 매칭
 
+### 혼밥메이트 - Quiet Meal
+
+특정 식당, 시간, 대화 정도를 기반으로 한 혼밥메이트 매칭
+
 <br>
 
 ## 기술 스택
@@ -28,6 +32,7 @@
 * Flyway
 * SpringDoc OpenAPI / Swagger
 * Gradle
+* Kakao Local REST API
 * AWS EC2
 
 <br>
@@ -57,6 +62,15 @@ com.team4.hanbbyeom
 │   ├── domain
 │   │   ├── RunningCourse       # 러닝 코스
 │   │   └── RunMatchCondition   # 러닝 매칭 조건
+│   ├── repository
+│   └── dto
+│
+├── meal                        # Quiet Meal
+│   ├── controller
+│   ├── service
+│   ├── domain
+│   │   ├── RestaurantSelection # 선택한 식당
+│   │   └── MealMatchCondition  # 혼밥 매칭 조건
 │   ├── repository
 │   └── dto
 │
@@ -91,7 +105,9 @@ com.team4.hanbbyeom
 │   ├── config
 │   ├── security
 │   │   └── jwt
-│   └── exception
+│   ├── exception
+│   └── external
+│       └── kakao               # Kakao Local API 연동
 │
 └── HanbbyeomApplication
 ```
@@ -103,10 +119,11 @@ com.team4.hanbbyeom
 | `auth`     | 회원가입, 로그인, JWT 인증        |
 | `user`     | 사용자 정보 및 신뢰 프로필          |
 | `run`      | Quiet Run 러닝 코스 및 매칭 조건  |
+| `meal`     | Quiet Meal 식당 선택 및 매칭 조건 |
 | `matching` | 공통 랜덤 매칭 및 상태 관리         |
 | `feedback` | 참석 여부 및 후기               |
 | `message`  | 프리셋 메시지                  |
-| `global`   | 공통 설정, 인증, 예외 처리          |
+| `global`   | 인증 설정, 예외 처리, 외부 API 연동  |
 
 <br>
 
@@ -119,6 +136,14 @@ com.team4.hanbbyeom
 * 페이스 범위 설정
 * 대화 정도 설정
 * 조건 기반 랜덤 매칭
+
+### Quiet Meal
+
+* Kakao Local API 기반 음식점 검색
+* 특정 음식점 선택
+* 활동 시간 설정
+* 대화 정도 설정
+* 동일 식당 기반 랜덤 매칭
 
 ### Matching
 
@@ -146,14 +171,6 @@ com.team4.hanbbyeom
 
 <br>
 
-## 향후 확장 계획
-
-**혼밥메이트(Quiet Meal)**
-
-Kakao Local API를 활용한 식당 검색과 동일 식당·시간·대화 정도를 기준으로 연결하는 기능
-
-<br>
-
 ## 네이밍 컨벤션
 
 | 분류           | 패턴                | 예시                       |
@@ -175,13 +192,13 @@ DTO 클래스명에 `Dto` 접미사 미사용
 `GitHub Flow` 기반 브랜치 운영
 
 ```text
-main ← dev ← feat/*
+main ← develop ← feat/*
 ```
 
 | 브랜치                           | 역할         |
 | ----------------------------- | ---------- |
 | `main`                        | 배포용 안정 브랜치 |
-| `dev`                         | 통합 개발 브랜치  |
+| `develop`                     | 통합 개발 브랜치  |
 | `feat/{도메인}-{이슈번호}-{기능명}`     | 기능 개발 브랜치  |
 | `fix/{도메인}-{이슈번호}-{기능명}`      | 버그 수정 브랜치  |
 | `refactor/{도메인}-{이슈번호}-{기능명}` | 리팩토링 브랜치   |
@@ -191,6 +208,7 @@ main ← dev ← feat/*
 ```text
 feat/auth-3-login
 feat/run-7-course-list
+feat/meal-10-restaurant-search
 feat/matching-15-create-match
 feat/feedback-21-create-review
 
@@ -200,10 +218,10 @@ fix/matching-25-duplicate-match
 ### 작업 흐름
 
 1. 작업 단위로 **Issue** 생성
-2. `dev` 브랜치에서 `feat/` 브랜치 분기
-3. 작업 완료 후 `dev`로 **PR** 생성
+2. `develop` 브랜치에서 `feat/` 브랜치 분기
+3. 작업 완료 후 `develop`으로 **PR** 생성
 4. **2인 이상 코드 리뷰 및 승인** 후 병합
-5. 배포 가능 상태 확인 후 `dev` → `main` PR 생성
+5. 배포 가능 상태 확인 후 `develop` → `main` PR 생성
 
 <br>
 
@@ -274,3 +292,4 @@ Resolves: #12
 * Frontend: Vercel
 * Backend: AWS EC2
 * Database: PostgreSQL
+* External API: Kakao Local REST API

@@ -48,7 +48,6 @@ jobs:
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
       JWT_SECRET_BASE64: dGVzdC1vbmx5LWp3dC1zZWNyZXQta2V5LTMyLWJ5dGVzISE=
-      EMAIL_VERIFICATION_HMAC_SECRET_BASE64: jTUOvTn1QecT7ja6E4pKYex0lyldhw0gIgwFK8gKTGE=
 
     steps:
       # GitHub Actions 가상 환경으로 저장소 코드 복사
