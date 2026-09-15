@@ -1,6 +1,8 @@
 package com.team4.hanbbyeom.run.controller;
 
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
+import com.team4.hanbbyeom.run.dto.RunConditionResponse;
+import com.team4.hanbbyeom.run.dto.RunConditionUpdateRequest;
 import com.team4.hanbbyeom.run.service.RunConditionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,5 +33,28 @@ public class RunConditionController {
         Long matchRequestId = runConditionService.create(currentUserId, request);
         // HTTP Status 201 Created 응답과 함께 생성된 조건의 상세 조회 URI(/api/run/conditions/{id})를 Location 헤더에 담아 반환
         return ResponseEntity.created(URI.create("/api/run/conditions/" + matchRequestId)).build();
+    }
+
+    @Operation(summary = "러닝 조건 상세 조회")
+    @GetMapping("/{id}")
+    public RunConditionResponse getById(
+            @PathVariable Long id,
+            @RequestHeader("X-USER-ID") Long currentUserId
+    ) {
+        // 서비스 계층을 호출하여 러닝 조건 상세 조회 비즈니스 로직을 수행하고, 조회 결과를 RunConditionResponse DTO로 반환받음
+        return runConditionService.getById(currentUserId, id);
+    }
+
+    @Operation(summary = "러닝 조건 수정")
+    @PatchMapping("/{id}")
+    public ResponseEntity<Void> update(
+            @PathVariable Long id,
+            @Valid @RequestBody RunConditionUpdateRequest request,
+            @RequestHeader("X-USER-ID") Long currentUserId)
+    {
+        // 서비스 계층을 호출하여 러닝 조건 수정 비즈니스 로직을 수행
+        runConditionService.update(currentUserId, id, request);
+        // HTTP Status 204 No Content 응답을 반환 (수정 성공 시 본문 없음)
+        return ResponseEntity.noContent().build();
     }
 }

@@ -24,7 +24,7 @@ public record RunConditionCreateRequest(
     String meetingPoint,
 
     // 희망 러닝 최소거리 (미터 단위, 필수)
-    // 5000 (5km)
+    // 예: 1000 (1km)
     @NotNull
     Integer distanceMinMeters,
 

@@ -78,4 +78,15 @@ public class RunMatchCondition implements Persistable<Long> {
     void markNotNew() {
         this.isNew = false;
     }
+
+    // 조건 수정: 코스, 만나는 곳, 거리 범위, 페이스 범위를 한 번에 변경
+    // matchRequest는 파라미터에 없음 - PK와 직렬 된 값이라 절대 바뀌지 않음
+    public void changeCondition(RunningCourse runningCourse, String meetingPoint, Integer distanceMinMeters, Integer distanceMaxMeters, Integer paceMinSec, Integer paceMaxSec) {
+        this.runningCourse = runningCourse;
+        this.meetingPoint = meetingPoint;
+        this.distanceMinMeters = distanceMinMeters;
+        this.distanceMaxMeters = distanceMaxMeters;
+        this.paceMinSec = paceMinSec;
+        this.paceMaxSec = paceMaxSec;
+    }
 }
