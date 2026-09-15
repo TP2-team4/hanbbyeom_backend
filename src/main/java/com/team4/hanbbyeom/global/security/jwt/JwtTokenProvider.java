@@ -2,7 +2,6 @@ package com.team4.hanbbyeom.global.security.jwt;
 
 import com.team4.hanbbyeom.global.config.JwtProperties;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -86,7 +85,19 @@ public class JwtTokenProvider {
     }
 
 
-    // JWT의 서명, 형식, 만료시간, issuer를 검증한 뒤, 검증된 Payload(Claims)를 반환하는 메서드
+    // JWT를 검증한 뒤 검증된 Payload(Claims)를 반환하는 메서드
+    // 이 메서드 하나가 아래를 모두 처리
+    // - 서명 검증 (위조 여부)
+    // - 형식 검증 (JWT 구조가 맞는지)
+    // - 만료 검증 (exp)
+    // - 발급자 검증 (iss)
+    // - 검증을 통과한 Claims 반환 (sub 등은 여기서 꺼내 씀)
+
+    // 검증 성공 → Claims 반환 / 검증 실패 → 예외 발생 (boolean을 반환하지 않음)
+    // 호출하는 쪽(Filter)에서 try-catch로 처리하며, 잡아야 할 예외는 두 계통
+    // 1. JwtException: 서명 위조, 만료, 형식 오류 등 JWT 관련 오류의 상위 타입
+    // 2. IllegalArgumentException: 토큰이 null이거나 빈 문자열인 경우
+    //   (JwtException의 하위 타입이 아니므로 따로 잡지 않으면 그대로 500이 됨)
     public Claims parseClaims(String token) {
         // parser(): JWT를 읽고 검증하기 위한 Parser 설정 시작
         return Jwts.parser()
@@ -107,30 +118,5 @@ public class JwtTokenProvider {
                 // 파싱과 검증이 끝난 JWT에서 Payload 부분(Claims 객체)을 꺼내는 메서드
                 // JWT 구조: Header.Payload.Signature
                 .getPayload();
-    }
-
-
-    // validateToken: JWT 문자열을 받아서 유효하면 true, 유효하지 않으면 false를 반환하는 메서드
-    public boolean validateToken(String token) {
-        try {
-            // 토큰이 유효한지(서명 위조 없음 + 형식 정상 + 만료 전 + issuer 일치) 확인
-            // 예외 없음 → JWT 검증에 성공
-            parseClaims(token);
-            return true;
-        } catch (JwtException | IllegalArgumentException e) {
-            // JwtException: JWT 관련 오류를 나타내는 상위 예외 타입
-            // IllegalArgumentException: 전달한 인자 자체가 잘못됐을 때 발생할 수 있는 Java 예외
-            // 둘 중 하나만 발생해도 false
-            return false;
-        }
-    }
-
-
-    // JWT 검증이 끝난 뒤, 이 요청을 보낸 사용자가 누구인지 알아낼 때 쓰는 메서드
-    public Long getUserId(String token) {
-        return Long.valueOf( // String 형태의 userId를 Long 타입으로 변환
-                // JWT를 파싱·검증하고 반환된 Claims 객체의 sub(Subject)에 저장된 userId 문자열을 꺼냄
-                parseClaims(token).getSubject()
-        );
     }
 }
