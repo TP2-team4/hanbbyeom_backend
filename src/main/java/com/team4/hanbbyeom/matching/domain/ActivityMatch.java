@@ -30,8 +30,11 @@ public class ActivityMatch {
     @Column(name = "course_name", nullable = false, length = 100)
     private String courseName;
 
-    @Column(name = "distance_meters", nullable = false)
-    private Integer distanceMeters;
+    @Column(name = "distance_min_meters", nullable = false)
+    private Integer distanceMinMeters;
+
+    @Column(name = "distance_max_meters", nullable = false)
+    private Integer distanceMaxMeters;
 
     @Column(name = "route_description", nullable = false, length = 1000)
     private String routeDescription;
@@ -67,14 +70,16 @@ public class ActivityMatch {
     protected ActivityMatch() {}
 
     public ActivityMatch(OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, TalkLevel talkLevel,
-                         String location, String courseName, Integer distanceMeters, String routeDescription,
+                         String location, String courseName, Integer distanceMinMeters, Integer distanceMaxMeters,
+                         String routeDescription,
                          Integer agreedPaceMinSec, Integer agreedPaceMaxSec, OffsetDateTime decisionExpiresAt) {
         this.scheduledAt = scheduledAt;
         this.scheduledEndAt = scheduledEndAt;
         this.talkLevel = talkLevel;
         this.location = location;
         this.courseName = courseName;
-        this.distanceMeters = distanceMeters;
+        this.distanceMinMeters = distanceMinMeters;
+        this.distanceMaxMeters = distanceMaxMeters;
         this.routeDescription = routeDescription;
         this.agreedPaceMinSec = agreedPaceMinSec;
         this.agreedPaceMaxSec = agreedPaceMaxSec;
