@@ -19,6 +19,8 @@ import java.time.OffsetDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+// 러닝 조건 서비스 통합 테스트
+// 조건 등록 정상 처리 및 다양한 예외(존재하지 않는 코스/요청, 타인 소유 권한 예외, 페이스/거리 검증 실패) 케이스를 검증합니다.
 @SpringBootTest
 @Transactional
 public class RunConditionServiceTest {
@@ -32,26 +34,31 @@ public class RunConditionServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private Long ownerUserId;
-    private Long otherUserId;
-    private Long matchRequestId;
-    private Long courseId;
+    // 테스트 실행 시 공유할 데이터 식별자 변수
+    private Long ownerUserId;     // 매칭 요청 소유자 유저 ID
+    private Long otherUserId;     // 다른 유저 ID (권한 검증용)
+    private Long matchRequestId;  // 사전 생성된 매칭 요청 ID
+    private Long courseId;        // 시딩된 코스 ID ("뚝섬 한강공원")
 
+    // 각 테스트 실행 전 필요한 기본 픽스처(유저, 코스, 매칭 요청) 데이터 생성 및 초기화
     @BeforeEach
     void setUp() {
+        // 소유자와 타인 유저 생성
         ownerUserId = createUser("owner");
         otherUserId = createUser("other");
 
+        // V5 시딩 데이터 중 '뚝섬 한강공원' 코스의 ID 조회
         courseId = jdbcTemplate.queryForObject(
                 "SELECT id FROM running_course WHERE name = ? LIMIT 1", Long.class, "뚝섬 한강공원");
 
+        // 소유자 명의의 매칭 요청(MatchRequest) 사전 등록 및 ID 확보
         MatchRequest matchRequest = new MatchRequest(
                 ownerUserId, OffsetDateTime.now().plusHours(5), TalkLevel.SILENT,
                 OffsetDateTime.now().plusHours(4)
         );
         matchRequestId = matchRequestRepository.save(matchRequest).getId();
     }
-
+    // users 테이블 제약 조건에 맞추어 임의의 테스트 유저 데이터를 직접 삽입하는 도우미 메서드
     private Long createUser(String label) {
         return jdbcTemplate.queryForObject(
                 "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
@@ -59,13 +66,13 @@ public class RunConditionServiceTest {
                 label + "-" + System.nanoTime() + "@example.com", "dummy-hash", label, OffsetDateTime.now()
         );
     }
-
+    // 정상적인 입력 값을 가진 기본 요청 DTO 생성 도우미 메서드
     private RunConditionCreateRequest validRequest() {
         return new RunConditionCreateRequest(
                 matchRequestId, courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
         );
     }
-
+    // 정상적인 조건 등록 시, DB에 저장되고 매칭 요청 ID가 반환되는지 검증
     @Test
     void 정상_등록하면_저장되고_아이디가_반환된다() {
         Long savedId = runConditionService.create(ownerUserId, validRequest());
@@ -73,7 +80,7 @@ public class RunConditionServiceTest {
         assertThat(savedId).isEqualTo(matchRequestId);
         assertThat(runMatchConditionRepository.findById(savedId)).isPresent();
     }
-
+    // 존재하지 않는 매칭 요청 ID로 조건 등록 시, MatchRequestNotFoundException 발생 여부 검증
     @Test
     void 존재하지_않는_matchRequestId면_예외가_발생한다() {
         RunConditionCreateRequest request = new RunConditionCreateRequest(
@@ -83,13 +90,13 @@ public class RunConditionServiceTest {
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
                 .isInstanceOf(MatchRequestNotFoundException.class);
     }
-
+    // 매칭 요청 소유자가 아닌 다른 유저가 조건 등록 시도 시, AccessDeniedException 발생 여부 검증
     @Test
     void 본인_소유가_아닌_matchRequest면_예외가_발생한다() {
         assertThatThrownBy(() -> runConditionService.create(otherUserId, validRequest()))
                 .isInstanceOf(AccessDeniedException.class);
     }
-
+    // 존재하지 않는 코스 ID로 조건 등록 시, IllegalArgumentException 발생 여부 검증
     @Test
     void 존재하지_않는_코스면_예외가_발생한다() {
         RunConditionCreateRequest request = new RunConditionCreateRequest(
@@ -99,7 +106,7 @@ public class RunConditionServiceTest {
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
                 .isInstanceOf(IllegalArgumentException.class);
     }
-
+    // 거리 최소값이 허용 범위보다 작거나, 최대값이 허용 범위보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
     void 거리가_허용_범위를_벗어나면_예외가_발생한다() {
         RunConditionCreateRequest request = new RunConditionCreateRequest(
@@ -109,7 +116,7 @@ public class RunConditionServiceTest {
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
                 .isInstanceOf(IllegalArgumentException.class);
     }
-
+    // 거리 최소값이 최대값보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
     void 거리_최소값이_최대값보다_크면_예외가_발생한다() {
         RunConditionCreateRequest request = new RunConditionCreateRequest(
@@ -119,7 +126,7 @@ public class RunConditionServiceTest {
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
                 .isInstanceOf(IllegalArgumentException.class);
     }
-
+    // 페이스 최소값이 허용 범위보다 작거나, 최대값이 허용 범위보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
     void 페이스가_허용_범위를_벗어나면_예외가_발생한다() {
         RunConditionCreateRequest request = new RunConditionCreateRequest(
