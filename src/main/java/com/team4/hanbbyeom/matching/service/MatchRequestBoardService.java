@@ -25,12 +25,13 @@ public class MatchRequestBoardService {
 
     public List<MatchBoardItemResponse> getBoard(String region, String talkLevel,
                                                  Integer minDistance, Integer maxDistance,
+                                                 Integer minPace, Integer maxPace,
                                                  String datePreset, Long currentUserId) {
 
         OffsetDateTime[] range = resolveDateRange(datePreset);
 
         List<MatchRequestRepository.MatchBoardRow> rows = matchRequestRepository.searchBoard(
-                region, talkLevel, minDistance, maxDistance, range[0], range[1], currentUserId
+                region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId
         );
 
         Map<Long, String> nicknameByUserId = fetchNicknames(rows.stream().map(MatchRequestRepository.MatchBoardRow::getUserId).toList());

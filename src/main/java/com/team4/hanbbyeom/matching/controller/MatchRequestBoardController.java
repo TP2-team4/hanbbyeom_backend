@@ -38,10 +38,12 @@ public class MatchRequestBoardController {
             @RequestParam(required = false) String talkLevel,
             @RequestParam(required = false) Integer minDistance,
             @RequestParam(required = false) Integer maxDistance,
+            @RequestParam(required = false) Integer minPace,
+            @RequestParam(required = false) Integer maxPace,
             @RequestParam(required = false) String datePreset, // "TODAY" | "TOMORROW" | "WEEKEND"
             @RequestHeader("X-USER-ID") Long currentUserId // TODO: 담당 A 인증 방식으로 교체
     ) {
-        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, datePreset, currentUserId);
+        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, currentUserId);
     }
 
     @GetMapping("/{requestId}/host-profile")
