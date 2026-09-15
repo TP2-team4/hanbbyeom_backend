@@ -1,5 +1,7 @@
 package com.team4.hanbbyeom.auth.controller;
 
+import com.team4.hanbbyeom.auth.dto.LoginRequest;
+import com.team4.hanbbyeom.auth.dto.LoginResponse;
 import com.team4.hanbbyeom.auth.dto.SignUpRequest;
 import com.team4.hanbbyeom.auth.dto.SignUpResponse;
 import com.team4.hanbbyeom.auth.service.AuthService;
@@ -28,6 +30,16 @@ public class AuthController {
 
         // body에 회원가입 결과(id, email, nickname)를 담아 200 OK 반환
         // 가입된 사용자 정보를 돌려줘야 하므로 ok가 아니라 ok(response)
+        return ResponseEntity
+                .ok(response);
+    }
+
+    // 로그인: POST /api/auth/login
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        LoginResponse response = authService.login(request);
+
+        // body에 발급된 Access Token을 담아 200 OK 반환
         return ResponseEntity
                 .ok(response);
     }
