@@ -18,6 +18,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 // Spring Security 요청 인가 설정
 // 인증 관련 API                 /api/auth/**        누구나 접근 가능
+// 러닝 코스 조회 API            /api/run/courses     누구나 접근 가능
 // 스웨거 UI 진입 경로            /swagger-ui.html    누구나 접근 가능
 // 스웨거 UI 정적 리소스          /swagger-ui/**      누구나 접근 가능
 // 스웨거 API 명세 데이터 제공     /v3/api-docs/**     누구나 접근 가능
@@ -63,6 +64,7 @@ public class SecurityConfig {
                         // requestMatchers(...): 이 URL 패턴에 해당하는 요청을 선택
                         // permitAll(): 인증 여부와 관계없이 모두 접근 허용
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/run/courses").permitAll()
                         .requestMatchers(
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
