@@ -74,21 +74,11 @@ public class MatchRequestCommandService {
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);
 
-        // 1) 도메인 상태 검증을 먼저 — SEARCHING이 아니면 여기서 IllegalStateException이 터지고
-        //    아래 run_match_condition UPDATE는 아예 실행되지 않음
+        // 담당 범위: C(이 메서드) = scheduledAt, talkLevel / B(#16 별도 API) = courseId, meetingPoint,
+        // distanceMinMeters/MaxMeters, paceMinSec/MaxSec.
+        // 코스·거리·페이스·만나는 곳은 이 메서드가 검증 없이 같이 덮어쓰고 있었던 버그였음 —
+        // run_match_condition에 대한 UPDATE를 여기서 완전히 제거하고, 팀원B의 #16 API가 전담하도록 함.
         matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
-
-        // 2) 검증을 통과한 요청만 run_match_condition에 반영
-        jdbcTemplate.update(
-                """
-                UPDATE run_match_condition
-                SET course_id = ?, meeting_point = ?, distance_min_meters = ?, distance_max_meters = ?,
-                    pace_min_sec = ?, pace_max_sec = ?
-                WHERE match_request_id = ?
-                """,
-                request.courseId(), request.meetingPoint(), request.distanceMinMeters(), request.distanceMaxMeters(),
-                request.paceMinSec(), request.paceMaxSec(), matchRequestId
-        );
     }
 
     @Transactional
