@@ -83,25 +83,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 7. 매칭 신청 시 본인 활성 모집글이 없을 때
-    @ExceptionHandler(NoActiveMatchRequestException.class)
-    public ResponseEntity<ErrorResponse> handleNoActiveMatchRequest(NoActiveMatchRequestException e) {
-        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
-    }
-
-    // 8. 이미 마감/진행 중인 게시글에 신청하거나, 확정된 매칭을 취소하려 할 때
+    // 7. 이미 마감/진행 중인 게시글에 신청하거나, 확정된 매칭을 취소하려 할 때
     @ExceptionHandler(MatchRequestNotSearchingException.class)
     public ResponseEntity<ErrorResponse> handleMatchRequestNotSearching(MatchRequestNotSearchingException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 9. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
+    // 8. 본인과 무관한 매칭의 신청자 프로필을 조회하려 할 때
     @ExceptionHandler(NotMatchParticipantException.class)
     public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 10. 로그인 인증 실패 (이메일 불일치 또는 비밀번호 불일치)
+    // 9. 로그인 인증 실패 (이메일 불일치 또는 비밀번호 불일치)
     // AuthenticationManager는 "사용자 없음"도 BadCredentialsException으로 바꿔서 던짐
     // → 두 경우가 애초에 같은 예외로 도착하고, 여기서 고정 문구를 쓰므로 응답도 완전히 동일
     //   이 핸들러가 없으면 최종 핸들러로 떨어져 500이 나감
@@ -115,13 +109,13 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("이메일 또는 비밀번호가 올바르지 않습니다."));
     }
 
-    // 11. 본인 소유가 아닌 리소스에 접근을 시도할 때
+    // 10. 본인 소유가 아닌 리소스에 접근을 시도할 때
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 12. 예상하지 못한 예외를 처리하는 최종 핸들러
+    // 11. 예상하지 못한 예외를 처리하는 최종 핸들러
     // 위 핸들러들 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
     // 2·3번과 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음

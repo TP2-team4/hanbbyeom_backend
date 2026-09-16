@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.run.service;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -216,5 +217,17 @@ public class RunConditionServiceTest {
 
         assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, request))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // 이미 신청이 들어와(SEARCHING이 아님) 있는 게시글의 조건을 수정하려 하면 거부되는지 검증
+    @Test
+    void SEARCHING_상태가_아니면_수정_시도시_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        matchRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
+
+        assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, validUpdateRequest()))
+                .isInstanceOf(IllegalStateException.class);
     }
 }
