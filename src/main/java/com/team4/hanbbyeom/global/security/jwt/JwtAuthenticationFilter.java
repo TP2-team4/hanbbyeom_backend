@@ -10,20 +10,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
 
 // 중요!!
 
@@ -41,41 +38,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // (데이터 구조를 정의하는 "스키마(schema)"와는 다른 단어)
     private static final String BEARER_SCHEME = "Bearer";
 
-    // 이 필터를 아예 실행하지 않을 요청 목록 (로그인 전에 호출해야 하는 공개 API)
+    private final JwtTokenProvider jwtTokenProvider; // JWT의 서명·만료시간·발급자·형식 검증
+    private final CustomUserDetailsService userDetailsService; // JWT에서 꺼낸 사용자 ID로 활성 사용자 조회
+    private final JwtAuthenticationEntryPoint authenticationEntryPoint; // 인증 실패 시 공통 형식의 401 응답 작성
+
+    // 이 필터를 아예 실행하지 않을 요청 조건 (로그인 전에 호출해야 하는 공개 API)
     // 이 필터는 잘못된 토큰을 만나면 즉시 401을 쓰고 다음 필터로 넘기지 않기 때문에,
     // 제외하지 않으면 만료된 토큰이 헤더에 남아 있을 때 로그인 자체가 막혀 버림
     // → 공개 API는 토큰을 아예 쳐다보지 않고 통과시켜야 함
 
-    // "/api/auth/**" 같은 넓은 패턴을 쓰지 않는 이유:
-    // → 나중에 추가될 /api/auth/logout, /api/auth/refresh처럼 인증이 필요한 API까지
-    //   자동으로 검사 대상에서 빠져버림 (경로와 HTTP 메서드를 하나씩 정확히 지정)
-
-    // PathPatternRequestMatcher: (Spring Security 제공) 요청의 HTTP 메서드와 경로가 조건과 맞는지 판단하는 객체
-    private static final List<RequestMatcher> JWT_FILTER_BYPASS_MATCHERS = List.of(
-            // 회원가입
-            PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/signup"),
-            // 로그인 (토큰을 발급받는 API라 당연히 토큰 없이 호출 가능해야 함)
-            PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/login"),
-            // 이메일 인증 코드 발송
-            PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications"),
-            // 이메일 인증 코드 확인
-            PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications/confirm"),
-            // 러닝 코스 목록 조회 (로그인 없이 볼 수 있는 공개 데이터)
-            PathPatternRequestMatcher.pathPattern(HttpMethod.GET, "/api/run/courses")
-    );
-
-    private final JwtTokenProvider jwtTokenProvider; // JWT의 서명·만료시간·발급자·형식 검증
-    private final CustomUserDetailsService userDetailsService; // JWT에서 꺼낸 사용자 ID로 활성 사용자 조회
-    private final JwtAuthenticationEntryPoint authenticationEntryPoint; // 인증 실패 시 공통 형식의 401 응답 작성
+    // SecurityConfig가 permitAll에 사용하는 것과 동일한 조건 객체를 그대로 전달받음
+    // → 공개 경로를 두 파일에서 따로 관리하지 않으므로 인가 정책과 필터 제외 정책이 어긋날 수 없음
+    // → 이 필터는 어떤 경로가 공개인지 알 필요가 없고, 그 판단은 전적으로 SecurityConfig가 담당
+    private final RequestMatcher jwtBypassMatcher;
 
     @Override
     // shouldNotFilter: (OncePerRequestFilter 제공) true를 반환하면 이 필터의 doFilterInternal을 건너뜀
     // 필터 안에서 경로를 if문으로 검사하지 않고 이 메서드를 쓰는 이유:
     // → "검사 대상이 아니다"라는 판단을 인증 로직과 분리해서, 제외 목록만 보면 공개 API를 한눈에 알 수 있음
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // 제외 목록 중 하나라도 현재 요청과 일치하면 필터를 실행하지 않음
-        return JWT_FILTER_BYPASS_MATCHERS.stream()
-                .anyMatch(matcher -> matcher.matches(request));
+        // 현재 요청이 SecurityConfig에서 정의한 공개 API 조건과 일치하면 필터를 실행하지 않음
+        return jwtBypassMatcher.matches(request);
     }
 
     @Override
