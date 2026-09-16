@@ -18,14 +18,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 // CORS는 브라우저가 지키는 규칙이라 Postman·Swagger로는 확인되지 않음
 // → 응답에 어떤 헤더가 실려 나가는지를 직접 확인해야 검증 가능
-@SpringBootTest
+
+// properties로 허용 Origin을 고정하는 이유
+// → 이 값은 .env의 CORS_ALLOWED_ORIGINS로 덮어쓸 수 있어서, 배포 주소를 설정해둔 환경에서는
+//   localhost가 허용 목록에서 빠져 테스트가 실패함
+// → 검증할 대상은 "설정한 Origin이 실제로 적용되는가"이므로, 설정값을 테스트가 직접 지정
+@SpringBootTest(properties = "app.cors.allowed-origins=http://localhost:5173,http://localhost:3000")
 @AutoConfigureMockMvc
 class CorsConfigurationTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    // application.yaml의 app.cors.allowed-origins 기본값에 포함된 주소
+    // 위 properties로 지정한 허용 목록에 포함된 주소
     private static final String ALLOWED_ORIGIN = "http://localhost:5173";
 
     // 허용 목록에 없는 주소
