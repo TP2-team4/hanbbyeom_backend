@@ -6,6 +6,7 @@ import com.team4.hanbbyeom.run.dto.RunConditionResponse;
 import com.team4.hanbbyeom.run.dto.RunConditionUpdateRequest;
 import com.team4.hanbbyeom.run.service.RunConditionService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,8 @@ import java.net.URI;
 // 러닝 조건 RunCondition 관련 API를 제공하는 컨트롤러
 // 사용자의 매칭 신청에 대한 러닝 세부 조건(코스, 페이스, 거리, 집결 장소 등)의 등록/조회/수정/삭제 요청을 담당합니다.
 @Tag(name = "Run - Condition", description = "러닝 조건 등록/조회/수정/삭제 API")
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/run/conditions")
 @RequiredArgsConstructor

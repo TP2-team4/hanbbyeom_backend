@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.user.controller;
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.user.dto.UserResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -12,6 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 // 사용자 정보 조회 API
 @Tag(name = "User", description = "사용자 정보 조회 API")
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/users")
 public class UserController {

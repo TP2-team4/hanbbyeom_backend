@@ -6,11 +6,14 @@ import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/matching/matches")
 public class ActivityMatchController {

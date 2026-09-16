@@ -1,0 +1,88 @@
+package com.team4.hanbbyeom.global.config;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+// Swagger 문서에 Bearer 인증 방식이 반영됐는지 검증
+
+// Swagger UI를 직접 눌러보는 대신 문서 데이터(/v3/api-docs)를 확인하는 이유
+// → UI는 이 데이터를 그리기만 하므로, 데이터가 맞으면 Authorize 버튼도 정상 동작
+// → 보호 API에는 인증이 걸리고 공개 API에는 안 걸렸는지를 자동으로 확인 가능
+@SpringBootTest
+@AutoConfigureMockMvc
+class SwaggerSecuritySchemeTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    @DisplayName("API 문서에 bearerAuth 인증 방식이 정의됨")
+    void 인증_방식_정의() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                // SwaggerConfig의 @SecurityScheme 설정이 그대로 문서에 들어갔는지 확인
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.description").value(
+                        "로그인 API에서 발급받은 Access Token을 입력합니다. "
+                                + "Bearer 접두사는 Swagger UI가 자동으로 추가합니다."));
+    }
+
+    @Test
+    @DisplayName("보호 API에 bearerAuth 인증 요구가 표시됨")
+    void 보호_API_인증_요구() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                // 내 정보 조회는 토큰이 필요한 API이므로 문서에도 인증 요구가 있어야 함
+                .andExpect(jsonPath("$.paths['/api/users/me'].get.security[0].bearerAuth").isArray())
+                // 보호 Controller 5개가 모두 문서상 인증 대상으로 표시되는지 확인
+                .andExpect(jsonPath(
+                        "$.paths['/api/run/conditions/{id}'].get.security[0].bearerAuth").isArray())
+                .andExpect(jsonPath(
+                        "$.paths['/api/matching/requests/{id}'].get.security[0].bearerAuth").isArray())
+                .andExpect(jsonPath(
+                        "$.paths['/api/matching/board'].get.security[0].bearerAuth").isArray())
+                .andExpect(jsonPath(
+                        "$.paths['/api/matching/matches/{activityMatchId}/applicant-profile']"
+                                + ".get.security[0].bearerAuth").isArray());
+    }
+
+    @Test
+    @DisplayName("공개 API에는 인증 요구가 표시되지 않음")
+    void 공개_API_인증_미요구() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                // 로그인·회원가입은 토큰 없이 호출하는 API이므로 인증 요구가 없어야 함
+                // → 있으면 Swagger UI가 Authorize 전에는 호출할 수 없는 것처럼 오해를 줌
+
+                // 각 경로마다 "문서에 존재함"을 먼저 확인하는 이유
+                // → doesNotExist()는 경로 자체가 문서에 없을 때도 통과함
+                //   경로가 바뀌거나 사라지면 검증이 조용히 무의미해지므로, 존재 확인을 함께 둠
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post.security").doesNotExist())
+
+                .andExpect(jsonPath("$.paths['/api/auth/signup'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/signup'].post.security").doesNotExist())
+
+                .andExpect(jsonPath("$.paths['/api/auth/email-verifications'].post").exists())
+                .andExpect(jsonPath(
+                        "$.paths['/api/auth/email-verifications'].post.security").doesNotExist())
+
+                .andExpect(jsonPath("$.paths['/api/auth/email-verifications/confirm'].post").exists())
+                .andExpect(jsonPath(
+                        "$.paths['/api/auth/email-verifications/confirm'].post.security").doesNotExist())
+
+                // 공개 데이터인 러닝 코스 목록 조회도 동일
+                .andExpect(jsonPath("$.paths['/api/run/courses'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/run/courses'].get.security").doesNotExist());
+    }
+}

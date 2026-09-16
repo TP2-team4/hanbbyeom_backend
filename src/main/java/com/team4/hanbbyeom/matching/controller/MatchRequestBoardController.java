@@ -11,6 +11,7 @@ import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.matching.service.MatchApplyService;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,8 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.util.List;
 
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/matching/board")
 public class MatchRequestBoardController {
