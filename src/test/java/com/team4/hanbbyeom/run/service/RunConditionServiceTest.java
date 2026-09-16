@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
 import com.team4.hanbbyeom.run.dto.RunConditionResponse;
@@ -219,6 +220,44 @@ public class RunConditionServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    // 정상적인 삭제 시, 조건이 삭제되고 매칭 요청 상태가 CANCELLED로 바뀌는지 검증
+    @Test
+    void 정상_삭제하면_조건이_삭제되고_매칭요청이_CANCELLED로_바뀐다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        runConditionService.delete(ownerUserId, matchRequestId);
+
+        assertThat(runMatchConditionRepository.findById(matchRequestId)).isEmpty();
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        assertThat(matchRequest.getStatus()).isEqualTo(MatchRequestStatus.CANCELLED);
+    }
+
+    // 존재하지 않는 id를 삭제 시도하면, RunMatchConditionNotFoundException 발생 여부 검증
+    @Test
+    void 존재하지_않는_id를_삭제하면_예외가_발생한다() {
+        assertThatThrownBy(() -> runConditionService.delete(ownerUserId, 999_999L))
+                .isInstanceOf(RunMatchConditionNotFoundException.class);
+    }
+
+    // 타인 소유의 조건을 삭제 시도하면, AccessDeniedException 발생 여부 검증
+    @Test
+    void 타인_소유_조건을_삭제하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        assertThatThrownBy(() -> runConditionService.delete(otherUserId, matchRequestId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    // SEARCHING 상태가 아닌 매칭 요청의 조건을 삭제 시도하면, MatchRequestNotSearchingException 발생 여부 검증
+    @Test
+    void SEARCHING_상태가_아니면_삭제하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        matchRequest.changeStatus(MatchRequestStatus.MATCHED);
+
+        assertThatThrownBy(() -> runConditionService.delete(ownerUserId, matchRequestId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
     // 이미 신청이 들어와(SEARCHING이 아님) 있는 게시글의 조건을 수정하려 하면 거부되는지 검증
     @Test
     void SEARCHING_상태가_아니면_수정_시도시_예외가_발생한다() {

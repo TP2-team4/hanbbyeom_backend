@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.run.service;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.domain.RunMatchCondition;
 import com.team4.hanbbyeom.run.domain.RunningCourse;
@@ -114,6 +115,21 @@ public class RunConditionService {
                 request.distanceMaxMeters(),
                 request.paceMinSec(),
                 request.paceMaxSec());
+    }
+
+    @Transactional
+    public void delete(Long currentUserId, Long matchRequestId) {
+        // 기존 조건 데이터 조회 및 본인 소유 권한 검증
+        RunMatchCondition condition = getOwnedCondition(currentUserId, matchRequestId);
+        MatchRequest matchRequest = condition.getMatchRequest();
+        // SEARCHING 상태가 아니면(이미 신청/확정된 모집글) 삭제 거부
+        if (matchRequest.getStatus() != MatchRequestStatus.SEARCHING) {
+            throw new MatchRequestNotSearchingException("이미 신청이 진행 중이거나 확정된 모집글은 조건을 삭제할 수 없어요.");
+        }
+        // 러닝 조건 row 자체는 실제로 삭제
+        runMatchConditionRepository.delete(condition);
+        // 매칭 요청(게시글)은 삭제 대신 상태만 CANCELLED로 전환 (이력 보존)
+        matchRequest.changeStatus(MatchRequestStatus.CANCELLED);
     }
 
     private void validateRange(Integer min, Integer max, int allowedMin, int allowedMax, String label) {
