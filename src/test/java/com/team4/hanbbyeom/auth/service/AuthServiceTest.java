@@ -49,10 +49,11 @@ class AuthServiceTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider; // 발급된 토큰의 내용을 확인하기 위해 사용
 
+    // 테스트 공통 상수
     private static final String PASSWORD = "test1234";
     private static final String NICKNAME = "테스트";
 
-    // 인증 기록의 codeHash는 이 테스트에서 비교 대상이 아니므로 형식만 맞는 더미값 사용
+    // 이메일 인증번호의 Hash: 형식만 맞는 가짜 Hash 값 (문자열 32번 반복해서 생성)
     private static final String DUMMY_CODE_HASH = "00".repeat(32);
 
     // 테스트마다 겹치지 않는 이메일 생성 (EmailVerificationServiceTest와 동일한 방식)
@@ -61,21 +62,23 @@ class AuthServiceTest {
     }
 
     // 회원가입은 이메일 인증 완료를 전제로 하므로, 인증이 끝난 기록을 미리 만들어둠
-    // (실제 인증 코드는 해시로만 저장되어 테스트에서 알 수 없으므로 기록을 직접 저장)
+    // (실제 인증 코드는 해시로만 저장되어 테스트에서 알 수 없으므로 DB에 기록을 직접 저장)
     private void 이메일_인증_완료(String email) {
         EmailVerification verification = new EmailVerification(
                 email,
                 VerificationPurpose.SIGNUP,
                 DUMMY_CODE_HASH,
-                Instant.now().plusSeconds(300) // 만료 시각
+                Instant.now().plusSeconds(300) // 만료 시각(300초=5분 뒤)
         );
         verification.markVerified(Instant.now()); // 인증 성공 시각 기록
 
+        // 만든 인증 완료 Entity를 DB에 저장
         emailVerificationRepository.save(verification);
     }
 
     // 로그인 테스트에서 사용할 가입 완료 계정 준비
     private SignUpResponse 가입된_계정(String email) {
+        // 회원가입 전제조건 세팅
         이메일_인증_완료(email);
 
         return authService.signUp(
@@ -87,6 +90,16 @@ class AuthServiceTest {
         );
     }
 
+    // 기능	    확인하는 내용
+    // 회원가입	비밀번호가 해시로 저장되는가
+    // 회원가입	중복 이메일을 거부하는가
+    // 회원가입	이메일 인증을 안 하면 거부하는가
+    // 로그인	정상 로그인 시 Access Token이 발급되는가
+    // 로그인	JWT의 sub에 userId가 들어가는가
+    // 로그인	이메일 대소문자/공백을 정규화하는가
+    // 로그인	잘못된 비밀번호를 거부하는가
+    // 로그인	없는 이메일도 동일한 인증 실패로 처리하는가
+
     @Test
     @DisplayName("회원가입 시 비밀번호가 평문이 아닌 해시로 저장")
     void signUp_비밀번호_해시_저장() {
@@ -94,7 +107,9 @@ class AuthServiceTest {
 
         가입된_계정(email);
 
-        User user = userRepository.findByEmailAndDeletedAtIsNull(email).orElseThrow();
+        User user = userRepository
+                .findByEmailAndDeletedAtIsNull(email)
+                .orElseThrow();
 
         // 입력한 비밀번호가 그대로 저장되지 않았는지 확인
         assertNotEquals(PASSWORD, user.getPasswordHash());
@@ -108,6 +123,7 @@ class AuthServiceTest {
         String email = randomEmail();
         가입된_계정(email);
 
+        // 지정한 Exception이 발생해야 테스트 성공
         assertThrows(
                 IllegalStateException.class,
                 () -> authService.signUp(
@@ -163,7 +179,7 @@ class AuthServiceTest {
         String email = randomEmail();
         가입된_계정(email);
 
-        // 저장은 소문자로 되지만, 조회 시에도 같은 규칙으로 정규화되므로 찾을 수 있어야 함
+        // 회원가입 때와 동일하게 로그인 시에도 이메일의 공백 제거·소문자 변환이 적용되는지 확인
         LoginResponse response = authService.login(
                 new LoginRequest(
                         "  " + email.toUpperCase() + "  ",
@@ -194,9 +210,10 @@ class AuthServiceTest {
     @Test
     @DisplayName("가입되지 않은 이메일로 로그인 거부 (비밀번호 불일치와 같은 예외)")
     void login_없는_이메일_거부() {
-        // 사용자를 못 찾은 경우에도 UsernameNotFoundException이 아니라
-        // BadCredentialsException으로 바뀌어 전달됨
-        // → 가입 여부가 응답으로 드러나지 않음
+        // UsernameNotFoundException: 사용자를 찾을 수 없음
+        // BadCredentialsException: 인증 정보가 올바르지 않음
+        // 사용자를 못 찾은 경우에도 BadCredentialsException로 통일해서 전달
+        // → 가입 여부가 응답으로 드러나지 않음 (User Enumeration, 즉 사용자 존재 여부 추측 방지)
         assertThrows(
                 BadCredentialsException.class,
                 () -> authService.login(
