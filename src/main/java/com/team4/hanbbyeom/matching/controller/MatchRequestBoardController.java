@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.controller;
 
+import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.dto.MatchApplyRequest;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
@@ -11,6 +12,7 @@ import com.team4.hanbbyeom.matching.service.MatchApplyService;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -34,7 +36,7 @@ public class MatchRequestBoardController {
 
     // 모집 탭 목록 조회 — 쿼리 파라미터는 전부 선택값(생략 가능): course/talkLevel은 정확히
     // 일치하는 값만, minDistance~maxPace는 "게시글의 범위와 겹치는지"로 필터링, datePreset은
-    // TODAY/TOMORROW/WEEKEND 중 하나. currentUserId로 본인이 올린 글은 결과에서 항상 제외된다.
+    // TODAY/TOMORROW/WEEKEND 중 하나. 인증된 사용자 id로 본인이 올린 글은 결과에서 항상 제외된다.
     @GetMapping
     public List<MatchBoardItemResponse> getBoard(
             @RequestParam(required = false) String course,
@@ -44,9 +46,10 @@ public class MatchRequestBoardController {
             @RequestParam(required = false) Integer minPace,
             @RequestParam(required = false) Integer maxPace,
             @RequestParam(required = false) String datePreset, // "TODAY" | "TOMORROW" | "WEEKEND"
-            @RequestHeader("X-USER-ID") Long currentUserId // TODO: 담당 A 인증 방식으로 교체
+            // @AuthenticationPrincipal: JWT 인증 필터가 SecurityContext에 넣어둔 인증된 사용자 정보
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, currentUserId);
+        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, principal.getUserId());
     }
 
     // requestId(호스트 게시글)의 작성자 신뢰도 프로필 조회 — 신청하기 전 "이 사람 어떤 사람이지"
@@ -67,9 +70,9 @@ public class MatchRequestBoardController {
     public ResponseEntity<Void> apply(
             @PathVariable Long requestId,
             @RequestBody(required = false) MatchApplyRequest request,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        Long activityMatchId = matchApplyService.apply(currentUserId, requestId);
+        Long activityMatchId = matchApplyService.apply(principal.getUserId(), requestId);
         return ResponseEntity.created(URI.create("/api/matching/matches/" + activityMatchId)).build();
     }
 
@@ -78,11 +81,11 @@ public class MatchRequestBoardController {
     @PostMapping("/{requestId}/apply/cancel")
     public ResponseEntity<Void> cancelApplication(
             @PathVariable Long requestId,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
         // 프론트는 requestId(호스트 게시글 id)만 알고 있으면 되고, activityMatchId를 찾는 건
         // MatchApplyService.cancelApplication() 내부에서 처리합니다. 컨트롤러는 그대로 위임만 합니다.
-        matchApplyService.cancelApplication(currentUserId, requestId);
+        matchApplyService.cancelApplication(principal.getUserId(), requestId);
         return ResponseEntity.noContent().build();
     }
 }
