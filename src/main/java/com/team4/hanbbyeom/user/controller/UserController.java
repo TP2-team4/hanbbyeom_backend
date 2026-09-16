@@ -1,17 +1,24 @@
 package com.team4.hanbbyeom.user.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 // 사용자 정보 조회 API
+@Tag(name = "User", description = "사용자 정보 조회 API")
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
     // 내 정보 조회: GET /api/users/me
 
+    @Operation(
+            summary = "내 정보 조회",
+            description = "인증이 필요한 내 정보 조회 엔드포인트입니다."
+    )
     @GetMapping("/me")
     public ResponseEntity<String> me() {
         // 지금은 고정 응답(임시)이며, JWT 인증 필터를 붙인 뒤 실제 사용자 정보를 반환하도록 변경
