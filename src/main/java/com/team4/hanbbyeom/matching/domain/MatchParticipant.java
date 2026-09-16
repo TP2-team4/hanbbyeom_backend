@@ -14,7 +14,8 @@ public class MatchParticipant {
     @Column(name = "activity_match_id", nullable = false)
     private Long activityMatchId;
 
-    @Column(name = "match_request_id", nullable = false)
+    // 호스트(A)는 항상 값이 있지만, 신청자(B)는 본인 게시글 없이 신청할 수 있어 NULL일 수 있음
+    @Column(name = "match_request_id")
     private Long matchRequestId;
 
     @Column(name = "user_id", nullable = false)

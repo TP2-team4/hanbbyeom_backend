@@ -1,7 +1,6 @@
 package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
-import com.team4.hanbbyeom.matching.exception.NoActiveMatchRequestException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -58,13 +56,16 @@ class MatchApplyServiceTest {
     }
 
     @Test
-    void 신청자가_활성_모집글이_없으면_신청이_거부된다() {
-        assertThatThrownBy(() -> matchApplyService.apply(applicantUserId, hostRequestId))
-                .isInstanceOf(NoActiveMatchRequestException.class);
+    void 신청자에게_본인_모집글이_없어도_신청이_성공한다() {
+        Long activityMatchId = matchApplyService.apply(applicantUserId, hostRequestId);
+
+        assertThat(activityMatchId).isNotNull();
+        MatchRequest updatedHost = matchRequestRepository.findById(hostRequestId).orElseThrow();
+        assertThat(updatedHost.getStatus()).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
     }
 
     @Test
-    void 신청_성공시_호스트와_신청자_모집글이_모두_PENDING_CONFIRMATION으로_바뀐다() {
+    void 신청자에게_본인_모집글이_있어도_그_상태는_그대로_유지된다() {
         MatchRequest applicantRequest = new MatchRequest(
                 applicantUserId, OffsetDateTime.now().plusHours(10), TalkLevel.LIGHT_CHAT,
                 OffsetDateTime.now().plusHours(9)
@@ -77,6 +78,8 @@ class MatchApplyServiceTest {
         MatchRequest updatedApplicant = matchRequestRepository.findById(applicantRequestId).orElseThrow();
 
         assertThat(updatedHost.getStatus()).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
-        assertThat(updatedApplicant.getStatus()).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
+        // 신청자 본인의 게시글은 이번 신청과 무관하게 그대로 SEARCHING으로 유지된다
+        // (신청은 이제 신청자 본인 게시글과 완전히 분리된 동작).
+        assertThat(updatedApplicant.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
     }
 }

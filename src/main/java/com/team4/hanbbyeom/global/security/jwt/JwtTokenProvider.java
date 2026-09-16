@@ -1,0 +1,122 @@
+package com.team4.hanbbyeom.global.security.jwt;
+
+import com.team4.hanbbyeom.global.config.JwtProperties;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.SecretKey;
+import java.time.Instant;
+import java.util.Date;
+
+// Provider: 어떤 값이나 기능을 만들어서 다른 곳에 제공하는 객체(관례)
+// JwtTokenProvider(이 파일): Service가 직접 JJWT 라이브러리 코드를 다루지 않게 대신 맡아주는 역할
+// Service나 Filter는 세부 방법을 모른 채 Provider에게 필요한 기능 요청! (JWT 관련 기술 로직은 Provider에 다 모음)
+
+@Component
+public class JwtTokenProvider {
+
+    // @ConfigurationProperties로 등록된 JwtProperties Bean을 생성자 주입받아 사용
+    private final JwtProperties jwtProperties;
+
+    // secretBase64(Base64 문자열)를 서명에 실제로 사용할 SecretKey 객체로 미리 변환해서 보관
+    // (매번 토큰을 만들 때마다 변환하면 비효율적이라 생성 시점에 한 번만 계산)
+    // 문자열을 그대로 getBytes()해서 키로 쓰면 안전하지 않다고 JJWT 공식 문서가 명시하고 있어서
+    // Base64로 안전하게 생성해둔 값을 Decoders.BASE64.decode()로 복원하는 방식 사용
+    private final SecretKey secretKey; // JWT에 서명하고 서명을 검증할 때 사용하는 비밀키 (서버만 알고있어야 함)
+
+    // 생성자
+    public JwtTokenProvider(JwtProperties jwtProperties) {
+
+        // Spring이 주입해준 JwtProperties를 현재 객체의 필드에 저장
+        // JwtTokenProvider 전체에서 JwtProperties 사용 가능
+        this.jwtProperties = jwtProperties;
+
+        // 설정 파일에 문자열 형태로 저장된 JWT 비밀키를 꺼내서,
+        // 실제 JWT 서명/검증에 사용할 SecretKey 객체로 만들어 this.secretKey에 저장하는 코드
+
+        // Keys: JJWT 라이브러리에서 제공하는 암호화 키 관련 유틸리티 클래스
+        // hmacShaKeyFor: 전달받은 byte[]를 HMAC-SHA 방식에서 사용할 수 있는 SecretKey 객체로 변환하는 메서드
+        this.secretKey = Keys.hmacShaKeyFor(
+                // Decoders: 여러 인코딩 형식을 다시 원래 데이터로 되돌릴 때 쓰는 도구 모음
+                Decoders // JJWT 라이브러리에서 제공하는 Decoders 모음 클래스
+                        .BASE64 // Base64용 디코더
+                        .decode( // Base64 Decoder의 decode() 메서드를 호출
+                                // JwtProperties에 저장된 JWT 비밀키의 Base64 문자열을 가져옴
+                                jwtProperties.secretBase64()
+                        )
+        );
+    }
+
+
+    // Access Token 생성 (로그인 성공 시 발급, 짧은 만료시간)
+    // userId를 받아 서명된 JWT 문자열을 생성
+    public String createAccessToken(
+            Long userId // 토큰을 발급받는 사용자 Id
+    ) {
+        Instant now = Instant.now(); // 현재 시각 가져옴 (발급시각, 만료시각 계산에 사용)
+
+        return Jwts.builder() // JJWT 라이브러리에서 JWT를 만들기 위한 Builder 객체를 생성
+
+                // Claims: Claim(JWT Payload 안의 정보)들을 Java에서 다룰 수 있게 담아놓은 객체
+
+                // JWT의 Subject(sub: 누구에 대한 토큰인지) Claim 설정
+                // JWT의 Subject는 문자열로 저장하므로 Long을 String으로 변환해 저장
+                .subject(String.valueOf(userId))
+
+                // JWT의 Issuer(iss: 누가 토큰을 발급했는지) Claim 설정
+                .issuer(jwtProperties.issuer())
+
+                // JWT의 Issued At(iat: 이 토큰을 언제 발급했는가) Claim을 설정
+                // JJWT가 여기서는 Date 객체를 받으므로 Instant를 Date로 변환해 저장
+                .issuedAt(Date.from(now))
+
+                // JWT의 Expiration(exp: 이 토큰이 언제 만료되는지) Claim으로 저장
+                // 현재 시각 + 설정 파일에서 읽어온 Access Token의 유효시간
+                .expiration(Date.from(now.plus(jwtProperties.accessTokenExpiration())))
+
+                // signWith: 지금까지 만든 JWT에 SecretKey를 이용해서 서명(Signature)
+                .signWith(secretKey)
+
+                // 지금까지 설정한 모든 걸 최종 JWT 문자열로 만들어서 반환
+                .compact();
+    }
+
+
+    // JWT를 검증한 뒤 검증된 Payload(Claims)를 반환하는 메서드
+    // 이 메서드 하나가 아래를 모두 처리
+    // - 서명 검증 (위조 여부)
+    // - 형식 검증 (JWT 구조가 맞는지)
+    // - 만료 검증 (exp)
+    // - 발급자 검증 (iss)
+    // - 검증을 통과한 Claims 반환 (sub 등은 여기서 꺼내 씀)
+
+    // 검증 성공 → Claims 반환 / 검증 실패 → 예외 발생 (boolean을 반환하지 않음)
+    // 호출하는 쪽(Filter)에서 try-catch로 처리하며, 잡아야 할 예외는 두 계통
+    // 1. JwtException: 서명 위조, 만료, 형식 오류 등 JWT 관련 오류의 상위 타입
+    // 2. IllegalArgumentException: 토큰이 null이거나 빈 문자열인 경우
+    //   (JwtException의 하위 타입이 아니므로 따로 잡지 않으면 그대로 500이 됨)
+    public Claims parseClaims(String token) {
+        // parser(): JWT를 읽고 검증하기 위한 Parser 설정 시작
+        return Jwts.parser()
+
+                // verifyWith: secretKey를 사용해서 JWT의 Signature가 정상인지 검증
+                .verifyWith(secretKey)
+
+                // JWT 안의 iss Claim이 반드시 지정한 값과 같아야 한다는 검증 조건을 추가
+                .requireIssuer(jwtProperties.issuer())
+
+                // 설정한 조건으로 Parser 완성
+                .build()
+
+                // 전달받은 서명된 JWT 문자열을 실제로 파싱하고 검증(앞에 설정한 검증조건으로)하는 메서드
+                // 문제가 있으면 예외 발생, 정상이면 파싱된 JWT 결과 객체 반환
+                .parseSignedClaims(token)
+
+                // 파싱과 검증이 끝난 JWT에서 Payload 부분(Claims 객체)을 꺼내는 메서드
+                // JWT 구조: Header.Payload.Signature
+                .getPayload();
+    }
+}

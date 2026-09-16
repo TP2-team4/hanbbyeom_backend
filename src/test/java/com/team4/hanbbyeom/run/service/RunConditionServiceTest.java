@@ -1,10 +1,15 @@
 package com.team4.hanbbyeom.run.service;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
+import com.team4.hanbbyeom.run.dto.RunConditionResponse;
+import com.team4.hanbbyeom.run.dto.RunConditionUpdateRequest;
+import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import com.team4.hanbbyeom.run.repository.RunMatchConditionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -135,5 +140,133 @@ public class RunConditionServiceTest {
 
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // 유효한 수정 요청 DTO 생성 도우미 메서드
+    private RunConditionUpdateRequest validUpdateRequest() {
+        return new RunConditionUpdateRequest(
+                courseId, "여의도 한강공원 2번 출구", 3000, 6000, 310, 380
+        );
+    }
+
+    // 정상적인 조회 시, 등록된 조건 값이 그대로 반환되는지 검증
+    @Test
+    void 정상_조회하면_등록된_값이_반환된다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        RunConditionResponse response = runConditionService.getById(ownerUserId, matchRequestId);
+
+        assertThat(response.matchRequestId()).isEqualTo(matchRequestId);
+        assertThat(response.courseId()).isEqualTo(courseId);
+        assertThat(response.meetingPoint()).isEqualTo("뚝섬유원지역 3번 출구");
+    }
+
+    // 존재하지 않는 id로 조회 시, RunMatchConditionNotFoundException 발생 여부 검증
+    @Test
+    void 존재하지_않는_id로_조회하면_예외가_발생한다() {
+        assertThatThrownBy(() -> runConditionService.getById(ownerUserId, 999_999L))
+                .isInstanceOf(RunMatchConditionNotFoundException.class);
+    }
+
+    // 타인 소유의 조건을 조회 시도하면, AccessDeniedException 발생 여부 검증
+    @Test
+    void 타인_소유_조건을_조회하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        assertThatThrownBy(() -> runConditionService.getById(otherUserId, matchRequestId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    // 정상적인 수정 시, 값이 실제로 반영되는지 검증
+    @Test
+    void 정상_수정하면_값이_반영된다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        runConditionService.update(ownerUserId, matchRequestId, validUpdateRequest());
+
+        RunConditionResponse response = runConditionService.getById(ownerUserId, matchRequestId);
+        assertThat(response.meetingPoint()).isEqualTo("여의도 한강공원 2번 출구");
+        assertThat(response.distanceMinMeters()).isEqualTo(3000);
+        assertThat(response.distanceMaxMeters()).isEqualTo(6000);
+        assertThat(response.paceMinSec()).isEqualTo(310);
+        assertThat(response.paceMaxSec()).isEqualTo(380);
+    }
+
+    // 존재하지 않는 id를 수정 시도하면, RunMatchConditionNotFoundException 발생 여부 검증
+    @Test
+    void 존재하지_않는_id를_수정하면_예외가_발생한다() {
+        assertThatThrownBy(() -> runConditionService.update(ownerUserId, 999_999L, validUpdateRequest()))
+                .isInstanceOf(RunMatchConditionNotFoundException.class);
+    }
+
+    // 타인 소유의 조건을 수정 시도하면, AccessDeniedException 발생 여부 검증
+    @Test
+    void 타인_소유_조건을_수정하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        assertThatThrownBy(() -> runConditionService.update(otherUserId, matchRequestId, validUpdateRequest()))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    // 허용 범위를 벗어난 값으로 수정 시도하면, IllegalArgumentException 발생 여부 검증
+    @Test
+    void 범위를_벗어난_값으로_수정하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+        RunConditionUpdateRequest request = new RunConditionUpdateRequest(
+                courseId, "출구", 500, 8000, 360, 400 // 500m < 최소 1000m
+        );
+
+        assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, request))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // 정상적인 삭제 시, 조건이 삭제되고 매칭 요청 상태가 CANCELLED로 바뀌는지 검증
+    @Test
+    void 정상_삭제하면_조건이_삭제되고_매칭요청이_CANCELLED로_바뀐다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        runConditionService.delete(ownerUserId, matchRequestId);
+
+        assertThat(runMatchConditionRepository.findById(matchRequestId)).isEmpty();
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        assertThat(matchRequest.getStatus()).isEqualTo(MatchRequestStatus.CANCELLED);
+    }
+
+    // 존재하지 않는 id를 삭제 시도하면, RunMatchConditionNotFoundException 발생 여부 검증
+    @Test
+    void 존재하지_않는_id를_삭제하면_예외가_발생한다() {
+        assertThatThrownBy(() -> runConditionService.delete(ownerUserId, 999_999L))
+                .isInstanceOf(RunMatchConditionNotFoundException.class);
+    }
+
+    // 타인 소유의 조건을 삭제 시도하면, AccessDeniedException 발생 여부 검증
+    @Test
+    void 타인_소유_조건을_삭제하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        assertThatThrownBy(() -> runConditionService.delete(otherUserId, matchRequestId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    // SEARCHING 상태가 아닌 매칭 요청의 조건을 삭제 시도하면, MatchRequestNotSearchingException 발생 여부 검증
+    @Test
+    void SEARCHING_상태가_아니면_삭제하면_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        matchRequest.changeStatus(MatchRequestStatus.MATCHED);
+
+        assertThatThrownBy(() -> runConditionService.delete(ownerUserId, matchRequestId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
+    // 이미 신청이 들어와(SEARCHING이 아님) 있는 게시글의 조건을 수정하려 하면 거부되는지 검증
+    @Test
+    void SEARCHING_상태가_아니면_수정_시도시_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        matchRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
+
+        assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, validUpdateRequest()))
+                .isInstanceOf(IllegalStateException.class);
     }
 }
