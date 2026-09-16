@@ -2,8 +2,12 @@ package com.team4.hanbbyeom.global.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 // Spring Security: 누가 우리 서버에 접근할 수 있는지를 관리해주는 Spring의 보안 프레임워크 (API 접근 권한 관리)
@@ -15,14 +19,40 @@ import org.springframework.security.web.SecurityFilterChain;
 // 인가(Authorization): 확인한 대상의 권한 확인
 
 // Spring Security 요청 인가 설정
-// 인증 관련 API                /api/auth/**       누구나 접근 가능
-// 러닝 코스 조회 API            /api/run/courses    누구나 접근 가능
-// 스웨거 UI                   /swagger-ui/**      누구나 접근 가능
-// 스웨거 API 명세 데이터 제공    /v3/api-docs/**     누구나 접근 가능
-// 오류 최종 처리 에러 경로       /error              누구나 접근 가능
-// 그 외 API                                       로그인/인증된 사용자만 접근 가능
+// 인증 관련 API                 /api/auth/**        누구나 접근 가능
+// 러닝 코스 조회 API            /api/run/courses     누구나 접근 가능
+// 스웨거 UI 진입 경로            /swagger-ui.html    누구나 접근 가능
+// 스웨거 UI 정적 리소스          /swagger-ui/**      누구나 접근 가능
+// 스웨거 API 명세 데이터 제공     /v3/api-docs/**     누구나 접근 가능
+// 오류 최종 처리 에러 경로        /error              누구나 접근 가능
+// 그 외 API                                        로그인/인증된 사용자만 접근 가능
+
 @Configuration
 public class SecurityConfig {
+
+    // PasswordEncoder Bean 등록 (비밀번호 암호화 및 검증에 사용)
+    // PasswordEncoder: (Spring Security 제공) 비밀번호 암호화/검증 인터페이스
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        // BCryptPasswordEncoder: (Spring Security 제공) PasswordEncoder를 BCrypt 방식으로 구현한 클래스
+        // 비밀번호를 BCrypt 방식으로 해시하고, 로그인할 때 입력 비밀번호가 저장된 해시와 맞는지 비교해주는 객체
+        return new BCryptPasswordEncoder();
+    }
+
+    // AuthenticationManager Bean 등록 (로그인 시 이메일·비밀번호 인증을 수행)
+    // Spring이 우리가 등록한 CustomUserDetailsService와 PasswordEncoder Bean을 알아서 연결해줌
+
+    // AuthenticationManager: (Spring Security 제공) 인증 처리의 진입점, 인증 창구(인터페이스)
+    // AuthService가 이 객체에 인증을 요청하면 아래 순서로 처리됨
+    // UserDetailsService로 사용자 조회 → PasswordEncoder로 비밀번호 비교 → 성공 시 Authentication 반환
+    @Bean
+    public AuthenticationManager authenticationManager(
+            // AuthenticationConfiguration: Spring Security가 내부적으로 구성해둔 인증 설정 모음
+            AuthenticationConfiguration configuration
+    ) {
+        // 이미 구성되어 있는 AuthenticationManager를 꺼내서 Bean으로 등록
+        return configuration.getAuthenticationManager();
+    }
 
     // 회원가입, 이메일 인증처럼 로그인 전에 호출해야 하는 API는 인증 없이 접근 가능해야 함
     // (임시) JWT 기반 요청 인증(#3)이 추가되기 전까지 /api/auth/** 전체를 공개 처리
@@ -52,7 +82,10 @@ public class SecurityConfig {
                         // permitAll(): 인증 여부와 관계없이 모두 접근 허용
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/run/courses").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers(
+                                "/swagger-ui.html",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**").permitAll()
                         // 검증 실패 등으로 발생한 예외를 Spring이 내부적으로 /error로 전달(forward)하는데,
                         // 이 경로가 허용되지 않으면 GlobalExceptionHandler가 만든 400 응답이 403으로 바뀌어버림
                         .requestMatchers("/error").permitAll()
