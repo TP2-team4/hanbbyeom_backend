@@ -4,9 +4,12 @@ import com.team4.hanbbyeom.global.security.CustomUserDetailsService;
 import com.team4.hanbbyeom.global.security.jwt.JwtAuthenticationEntryPoint;
 import com.team4.hanbbyeom.global.security.jwt.JwtAuthenticationFilter;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -18,6 +21,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 // Spring Security: 누가 우리 서버에 접근할 수 있는지를 관리해주는 Spring의 보안 프레임워크 (API 접근 권한 관리)
 // build.gradle에 spring-boot-starter-security 의존성이 있으면,
@@ -66,6 +74,55 @@ public class SecurityConfig {
         return configuration.getAuthenticationManager();
     }
 
+    // CORS(Cross-Origin Resource Sharing): 브라우저가 "지금 보고 있는 사이트 주소"와 다른 주소로
+    // 요청을 보낼 때, 그 요청을 허용할지 서버가 응답 헤더로 알려주는 규칙
+    // → 프론트엔드(예: http://localhost:5173)와 백엔드(http://localhost:8080)는 주소가 다르므로,
+    //   허용해주지 않으면 브라우저가 응답을 받고도 JavaScript에 넘겨주지 않고 막아버림
+    //   (Postman·Swagger에서는 브라우저 규칙이 적용되지 않아 이 설정 없이도 잘 됨)
+
+    // CorsConfigurationSource: (Spring 제공) 어떤 경로에 어떤 CORS 규칙을 적용할지 담아두는 객체
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            // application.yaml의 app.cors.allowed-origins 값을 목록으로 받음 (쉼표로 구분)
+            // 설정값이 하나뿐이라 JwtProperties 같은 전용 클래스 없이 @Value로 직접 주입
+            @Value("${app.cors.allowed-origins}") List<String> allowedOrigins
+    ) {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        // 요청을 허용할 프론트엔드 주소 (배포 시 .env의 CORS_ALLOWED_ORIGINS로 실제 주소 지정)
+        configuration.setAllowedOrigins(allowedOrigins);
+
+        // 우리 API가 사용하는 HTTP 메서드
+        // OPTIONS: 브라우저가 본 요청 전에 "이 요청 보내도 되냐"고 먼저 물어보는 preflight 요청용
+        configuration.setAllowedMethods(
+                List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
+
+        // 클라이언트가 보내도 되는 요청 헤더
+        // Authorization: Access Token, Content-Type: JSON 본문 전송용
+        configuration.setAllowedHeaders(
+                List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+
+        // 브라우저 JavaScript가 응답에서 꺼내 읽을 수 있도록 허용할 헤더
+        // → 이 목록에 없으면 응답에 헤더가 있어도 JavaScript에서는 보이지 않음
+        // Location: 201 Created 응답에서 새로 만들어진 리소스 주소를 읽기 위해
+        // WWW-Authenticate: 401이 "토큰 없음"인지 "토큰이 잘못됨(invalid_token)"인지 구분하기 위해
+        configuration.setExposedHeaders(
+                List.of(HttpHeaders.LOCATION, HttpHeaders.WWW_AUTHENTICATE));
+
+        // 쿠키·인증 정보를 자동으로 실어 보낼지 여부
+        // 지금은 Access Token을 Authorization 헤더로 직접 담아 보내므로 필요 없음
+        // 주의(#4): Refresh Token을 HttpOnly Cookie로 전환하면 true로 바꿔야 하고,
+        //          그때는 Origin에 와일드카드(*)를 쓸 수 없으므로 주소를 정확히 지정해야 함
+        configuration.setAllowCredentials(false);
+
+        // 위 규칙을 적용할 경로 등록
+        // 브라우저가 호출하는 건 API뿐이므로 /api/** 로 한정 (Swagger는 같은 주소에서 열려 CORS 대상 아님)
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", configuration);
+
+        return source;
+    }
+
     // 로그인 전에 호출해야 하는 API(회원가입·로그인·이메일 인증)와 공개 데이터 조회 API만 열어두고,
     // 나머지는 전부 Access Token이 있어야 접근 가능
 
@@ -100,6 +157,14 @@ public class SecurityConfig {
         );
 
         http
+                // cors: 위에서 등록한 CorsConfigurationSource Bean을 찾아 CORS 처리를 활성화
+                // → preflight(OPTIONS) 요청은 인가 판정 전에 처리되므로,
+                //   anyRequest().authenticated() 규칙 때문에 401이 나는 일이 없음
+                // 참고: Spring Security는 UrlBasedCorsConfigurationSource Bean이 있으면 이 설정을
+                //      자동으로 적용하므로 이 줄이 없어도 동작하지만, 필터 체인 구성만 봐도
+                //      CORS가 적용된다는 걸 알 수 있도록 명시적으로 남겨둠
+                .cors(Customizer.withDefaults())
+
                 // CSRF 보호 비활성화
                 // Access Token을 Authorization 헤더로 직접 실어 보내는 방식이라 브라우저가 자동으로
                 // 인증 정보를 실어 보내지 않음 → 공격자 사이트가 요청을 흉내 낼 수 없어 CSRF 위험 없음
