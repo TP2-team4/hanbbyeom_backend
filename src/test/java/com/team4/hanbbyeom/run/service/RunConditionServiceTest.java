@@ -258,4 +258,15 @@ public class RunConditionServiceTest {
         assertThatThrownBy(() -> runConditionService.delete(ownerUserId, matchRequestId))
                 .isInstanceOf(MatchRequestNotSearchingException.class);
     }
+    // 이미 신청이 들어와(SEARCHING이 아님) 있는 게시글의 조건을 수정하려 하면 거부되는지 검증
+    @Test
+    void SEARCHING_상태가_아니면_수정_시도시_예외가_발생한다() {
+        runConditionService.create(ownerUserId, validRequest());
+
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId).orElseThrow();
+        matchRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
+
+        assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, validUpdateRequest()))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

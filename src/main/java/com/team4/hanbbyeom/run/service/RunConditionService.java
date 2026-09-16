@@ -95,6 +95,12 @@ public class RunConditionService {
     public void update(Long currentUserId, Long matchRequestId, RunConditionUpdateRequest request) {
         // 기존 조건 데이터 조회 및 본인 소유 권한 검증
         RunMatchCondition condition = getOwnedCondition(currentUserId, matchRequestId);
+        // 상태 검증: MatchRequestCommandService.update()(일정/대화수준 수정)와 동일한 규칙 —
+        // 이미 신청이 들어와 PENDING_CONFIRMATION/MATCHED가 된 뒤에는 신청자가 본 조건과
+        // 달라지면 안 되므로, 모집 중(SEARCHING)일 때만 코스/거리/페이스/만나는 곳 수정을 허용한다.
+        if (condition.getMatchRequest().getStatus() != MatchRequestStatus.SEARCHING) {
+            throw new IllegalStateException("모집 중인 게시글만 조건을 수정할 수 있어요.");
+        }
         // 변경하려는 코스(RunningCourse) 존재 여부 검증
         RunningCourse runningCourse = runningCourseRepository.findById(request.courseId())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 코스예요"));

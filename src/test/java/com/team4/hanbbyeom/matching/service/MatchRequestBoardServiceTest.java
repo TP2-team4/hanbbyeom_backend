@@ -71,7 +71,7 @@ class MatchRequestBoardServiceTest {
     @Test
     void 코스_필터로_조회하면_일치하는_게시글만_반환되고_작성자_신뢰정보가_join된다() {
         List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                "뚝섬 한강공원", null, null, null, null, testUserId + 1 // 본인 제외되게 다른 id로 조회
+                "뚝섬 한강공원", null, null, null, null, null, null, testUserId + 1 // 본인 제외되게 다른 id로 조회
         );
 
         assertThat(result).hasSize(1);
@@ -84,7 +84,7 @@ class MatchRequestBoardServiceTest {
     @Test
     void 코스_필터가_일치하지_않으면_조회되지_않는다() {
         List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                "여의도 한강공원", null, null, null, null, testUserId + 1
+                "여의도 한강공원", null, null, null, null, null, null, testUserId + 1
         );
 
         assertThat(result).isEmpty();
@@ -93,7 +93,16 @@ class MatchRequestBoardServiceTest {
     @Test
     void 거리_범위가_겹치지_않으면_조회되지_않는다() {
         List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                null, null, 9000, 10000, null, testUserId + 1 // 테스트 데이터 범위(5000~8000)와 안 겹침
+                null, null, 9000, 10000, null, null, null, testUserId + 1 // 테스트 데이터 범위(5000~8000)와 안 겹침
+        );
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void 페이스_범위가_겹치지_않으면_조회되지_않는다() {
+        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
+                null, null, null, null, 450, 500, null, testUserId + 1 // 테스트 데이터 범위(360~400)와 안 겹침
         );
 
         assertThat(result).isEmpty();
@@ -102,7 +111,7 @@ class MatchRequestBoardServiceTest {
     @Test
     void 본인이_작성한_게시글은_목록에서_제외된다() {
         List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                null, null, null, null, null, testUserId // 작성자 본인으로 조회
+                null, null, null, null, null, null, null, testUserId // 작성자 본인으로 조회
         );
 
         assertThat(result).isEmpty();

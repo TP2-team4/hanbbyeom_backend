@@ -1,7 +1,6 @@
 package com.team4.hanbbyeom.matching.repository;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
-import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -9,7 +8,6 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Optional;
 
 public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long> {
 
@@ -38,6 +36,8 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
       AND (:talkLevel IS NULL OR mr.talk_level = :talkLevel)
       AND (:minDistance IS NULL OR rc.distance_max_meters >= :minDistance)
       AND (:maxDistance IS NULL OR rc.distance_min_meters <= :maxDistance)
+      AND (:minPace IS NULL OR rc.pace_max_sec >= :minPace)
+      AND (:maxPace IS NULL OR rc.pace_min_sec <= :maxPace)
       AND (CAST(:dateFrom AS timestamptz) IS NULL OR mr.scheduled_at >= CAST(:dateFrom AS timestamptz))
       AND (CAST(:dateTo AS timestamptz) IS NULL OR mr.scheduled_at < CAST(:dateTo AS timestamptz))
     """, nativeQuery = true)
@@ -45,6 +45,8 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
                                     @Param("talkLevel") String talkLevel,
                                     @Param("minDistance") Integer minDistance,
                                     @Param("maxDistance") Integer maxDistance,
+                                    @Param("minPace") Integer minPace,
+                                    @Param("maxPace") Integer maxPace,
                                     @Param("dateFrom") OffsetDateTime dateFrom,
                                     @Param("dateTo") OffsetDateTime dateTo,
                                     @Param("excludeUserId") Long excludeUserId);
@@ -106,6 +108,4 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getStatus();
         Long getUserId();
     }
-
-    Optional<MatchRequest> findByUserIdAndStatus(Long userId, MatchRequestStatus status);
 }
