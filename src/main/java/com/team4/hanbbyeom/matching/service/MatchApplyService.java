@@ -118,11 +118,11 @@ public class MatchApplyService {
         //    activityMatchId를 match_participant에서 역으로 찾는다 — matchRequestId와
         //    activityMatchId는 서로 다른 시퀀스라 그대로 넘겨 쓰면 안 됨.
         Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 3) 위에서 찾은 activityMatchId로 실제 ActivityMatch 엔티티를 가져온다.
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 4) 이 매칭에 연결된 참가자 2명(호스트 slot A, 신청자 slot B)을 모두 가져온 뒤,
         //    - 신청자(slot B) 중 요청자 본인과 일치하는 행을 찾는다. 없으면 "내 신청이 아닌 매칭을

@@ -125,7 +125,16 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 11. 로그인 인증 실패 처리
+    // 11. activityMatchId로 조회했는데 매칭 자체가 존재하지 않을 때 — 9번(403, "존재는 하지만
+    // 본인과 무관함")과 구분해서 404로 응답한다. 원래 이 케이스도 NotMatchParticipantException
+    // (403)으로 던지면서 메시지만 "존재하지 않는 매칭이에요"라고 되어 있어 상태 코드와 메시지가
+    // 어긋나 있었다(PR #57 리뷰 피드백으로 발견).
+    @ExceptionHandler(ActivityMatchNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleActivityMatchNotFound(ActivityMatchNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 12. 로그인 인증 실패 처리
     // AuthenticationManager는 "사용자 없음"도 BadCredentialsException으로 바꿔서 던짐
     // → 두 경우가 애초에 같은 예외로 도착하고, 여기서 고정 문구를 쓰므로 응답도 완전히 동일
     //   이 핸들러가 없으면 최종 핸들러로 떨어져 500이 나감
@@ -139,7 +148,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("이메일 또는 비밀번호가 올바르지 않습니다."));
     }
 
-    // 12. 리소스 접근 권한 없음 처리
+    // 13. 리소스 접근 권한 없음 처리
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity
@@ -147,11 +156,11 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 13. 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
+    // 14. 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
     // 원래 RunExceptionHandler(별도 @RestControllerAdvice)에 있었으나, 서로 다른
     // @RestControllerAdvice로 나뉘면 Spring이 먼저 평가되는 Advice 빈에서 매칭되는
     // 핸들러를 찾는 순간 멈춰버려서, catch-all이 있는 이 클래스가 먼저 평가될 경우
-    // 이 핸들러까지 도달하지 못하고 14번 catch-all(500)로 빠지는 문제가 있었음
+    // 이 핸들러까지 도달하지 못하고 15번 catch-all(500)로 빠지는 문제가 있었음
     // → 모든 구체적인 핸들러를 이 클래스 하나에 모아서 그런 순서 의존성을 없앤다
     @ExceptionHandler(RunMatchConditionNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
@@ -160,7 +169,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 14. 예상하지 못한 예외 처리
+    // 15. 예상하지 못한 예외 처리
     // 위 핸들러들 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
     // 3·4번과 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음

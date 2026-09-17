@@ -4,17 +4,23 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.matching.repository.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
 
 // 호스트의 수락/거절, 그리고 시스템의 자동 만료 처리를 담당. MatchApplyService(신청자 액션)와
 // 책임을 나눠서, "누가 주체인 액션인지"로 서비스를 분리했다.
 @Service
 public class MatchDecisionService {
+
+    private static final Logger log = LoggerFactory.getLogger(MatchDecisionService.class);
 
     private final MatchRequestRepository matchRequestRepository;
     private final ActivityMatchRepository activityMatchRepository;
@@ -42,7 +48,7 @@ public class MatchDecisionService {
 
         // 2) 매칭 건 조회
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 3) 참가자 2명 조회 - 호스트(slot A)가 요청자 본인인지 검증, 신청자(slot B) 존재 검증
         var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
@@ -77,7 +83,7 @@ public class MatchDecisionService {
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
         MatchParticipant host = participants.stream()
@@ -117,24 +123,81 @@ public class MatchDecisionService {
             if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
                 continue;
             }
+
+            // 참가자 존재 여부를 먼저 확인한다(상태 전이 전에!) — 원래는 activityMatch.expire()를
+            // 먼저 호출한 뒤 참가자를 못 찾으면 예외를 던졌는데, 그러면 이 배치 하나가 통째로
+            // 롤백되어(@Transactional) 같은 배치의 다른 정상 건들까지 매분 계속 처리 실패하는
+            // 문제가 있었다(PR #57 리뷰 피드백). 참가자 데이터가 비정상인 건은 로그만 남기고
+            // 건너뛰어(continue) 나머지 건은 정상 처리되도록 한다. 상태 전이도 참가자 확인 이후로
+            // 미뤄서, 건너뛴 건이 PROPOSED로 남아 다음 스케줄러 실행 때 다시 시도되게 한다.
+            var participants = matchParticipantRepository.findByActivityMatchId(activityMatch.getId());
+            Optional<MatchParticipant> host = findBySlot(participants, "A");
+            Optional<MatchParticipant> applicant = findBySlot(participants, "B");
+            if (host.isEmpty() || applicant.isEmpty()) {
+                log.warn("activityMatchId={} 자동 만료 처리 중 참가자 데이터 이상 발견(host 존재={}, " +
+                                "applicant 존재={}) - 이 건은 건너뛰고 다음 배치에서 재시도합니다.",
+                        activityMatch.getId(), host.isPresent(), applicant.isPresent());
+                continue;
+            }
+
             activityMatch.expire();
 
-            var participants = matchParticipantRepository.findByActivityMatchId(activityMatch.getId());
-            MatchParticipant host = participants.stream()
-                    .filter(p -> "A".equals(p.getSlot()))
-                    .findFirst()
-                    .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
-            MatchParticipant applicant = participants.stream()
-                    .filter(p -> "B".equals(p.getSlot()))
-                    .findFirst()
-                    .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
-
             // reject()와 동일하게 매칭이 무산됐으므로 두 참여 연결 모두 해제
-            host.release();
-            applicant.release();
+            host.get().release();
+            applicant.get().release();
 
-            transitionBothRequests(host, applicant, MatchRequestStatus.SEARCHING);
+            transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.SEARCHING);
         }
+    }
+
+    // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 확정(CONFIRMED)된 활동 중
+    // 예정 종료 시각(scheduled_end_at)이 지난 건들을 ENDED로 자연 종료 처리한다.
+    // ⚠️ 이게 없으면 CONFIRMED로 끝난 매칭의 두 참가자는 released_at이 영원히 안 채워져서
+    // uq_participant_active_user 제약에 걸려 이후 어떤 매칭에도 다시 참여할 수 없게 된다
+    // (팀원 리뷰로 발견 — accept()가 의도적으로 release()를 안 부르는 대신, 활동이 끝나면
+    // 반드시 이 메서드가 대신 풀어줘야 한다는 전제였는데 그 후속 처리가 빠져 있었음).
+    @Transactional
+    public void endOverdueActivities() {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        OffsetDateTime now = OffsetDateTime.now();
+        var overdueMatches = activityMatchRepository.findByStatusAndScheduledEndAtBefore(
+                ActivityMatchStatus.CONFIRMED, now);
+
+        for (ActivityMatch activityMatch : overdueMatches) {
+            // 락을 잡은 이후에도 방금 다른 트랜잭션이 처리했을 수 있으니 방어적으로 재확인
+            if (activityMatch.getStatus() != ActivityMatchStatus.CONFIRMED) {
+                continue;
+            }
+
+            // expireOverdue()와 동일한 이유로, 상태 전이 전에 참가자 존재부터 확인하고
+            // 비정상인 건은 로그만 남기고 건너뛴다(continue) — 예외를 던지면 이 배치 전체가
+            // 롤백돼 같은 배치의 다른 정상 건들까지 매분 계속 처리 실패하게 된다.
+            var participants = matchParticipantRepository.findByActivityMatchId(activityMatch.getId());
+            Optional<MatchParticipant> host = findBySlot(participants, "A");
+            Optional<MatchParticipant> applicant = findBySlot(participants, "B");
+            if (host.isEmpty() || applicant.isEmpty()) {
+                log.warn("activityMatchId={} 자동 종료 처리 중 참가자 데이터 이상 발견(host 존재={}, " +
+                                "applicant 존재={}) - 이 건은 건너뛰고 다음 배치에서 재시도합니다.",
+                        activityMatch.getId(), host.isPresent(), applicant.isPresent());
+                continue;
+            }
+
+            activityMatch.end();
+
+            // 게시글 상태(MATCHED)는 건드리지 않는다 — 활동이 정상적으로 끝난 것뿐이라
+            // reject()/expireOverdue()처럼 SEARCHING으로 되돌릴 이유가 없다. 여기서 필요한 건
+            // 오직 "두 참가자를 다시 매칭 가능한 상태로 풀어주는" release()뿐이다.
+            host.get().release();
+            applicant.get().release();
+        }
+    }
+
+    // expireOverdue()/endOverdueActivities()가 공통으로 쓰는 slot(A=호스트/B=신청자) 조회.
+    private Optional<MatchParticipant> findBySlot(List<MatchParticipant> participants, String slot) {
+        return participants.stream()
+                .filter(p -> slot.equals(p.getSlot()))
+                .findFirst();
     }
 
     // accept()/reject() 공통 — 응답 가능한 상태인지 검증한다. status가 PROPOSED가 아니거나

@@ -68,8 +68,10 @@ public class MatchParticipant {
 
     // 이 참여 연결을 "끝난" 상태로 표시 — released_at이 채워져야 uq_participant_active_user/
     // uq_participant_active_request 부분 유니크 인덱스에서 빠져서, 이 유저(또는 이 게시글)가
-    // 다음 매칭에 다시 참여할 수 있게 된다. CONFIRMED(확정)는 아직 활동이 안 끝났으므로 호출하면
-    // 안 되고, REJECTED/EXPIRED/CANCELLED처럼 매칭이 성사되지 않고 끝났을 때만 호출한다.
+    // 다음 매칭에 다시 참여할 수 있게 된다. REJECTED/EXPIRED/CANCELLED(매칭이 성사되지 않고
+    // 끝난 경우)뿐 아니라, CONFIRMED로 성사된 뒤 활동이 실제로 끝나 ENDED로 전이될 때도
+    // 호출한다(MatchDecisionService.endOverdueActivities()). 반대로 activity_match가
+    // 아직 CONFIRMED인 동안(=활동이 아직 안 끝난 상태)에는 호출하면 안 된다.
     public void release() {
         this.releasedAt = OffsetDateTime.now();
     }
