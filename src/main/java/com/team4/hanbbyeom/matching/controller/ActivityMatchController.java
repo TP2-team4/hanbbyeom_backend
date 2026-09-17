@@ -46,7 +46,12 @@ public class ActivityMatchController {
     // (REJECTED) 응답 시간이 지나 만료됐는지(EXPIRED) 확정됐는지(CONFIRMED)"를 구분해서 알
     // 방법이 없었는데(호스트 게시글 상태만 보면 둘 다 그냥 SEARCHING으로 보임), 이 API로
     // activityMatchId 기준 정확한 상태를 직접 조회할 수 있게 한다.
-    @Operation(summary = "매칭 건 상태 조회",
+    //
+    // ⚠️ 이 경로(GET /api/matching/matches/{activityMatchId})는 채팅 이슈에서 계획 중인
+    // "매칭 요약 조회" API와 같은 자리를 쓸 예정이다. 채팅 쪽에서 새 엔드포인트를 따로 만들지
+    // 말고, 이 API의 응답(ActivityMatchStatusResponse)에 코스명·장소·시간 등 필요한 필드를
+    // 확장하는 방향으로 계약을 맞출 것 — 팀 리뷰로 합의된 방향.
+    @Operation(summary = "매칭 건 상세·상태 조회",
             description = "이 매칭의 호스트 또는 신청자 본인만 조회할 수 있습니다. 신청자가 폴링해서 " +
                     "PROPOSED(대기중)/CONFIRMED(확정)/REJECTED(거절됨)/EXPIRED(응답시간 초과) 중 " +
                     "무엇인지 구분하는 용도로 쓸 수 있습니다.")

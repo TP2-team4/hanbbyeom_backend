@@ -166,6 +166,13 @@ class MatchingFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.meetingCode").isString());
+
+        // → 이 매칭과 아무 관련 없는 제3자가 조회하면 403이어야 한다 (권한 경계 회귀 테스트 —
+        // 리뷰 피드백: 참가자 확인 로직은 있었지만 실제로 막히는지 검증하는 테스트가 없었음)
+        Long strangerUserId = createUser("무관한사람");
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(strangerUserId)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
