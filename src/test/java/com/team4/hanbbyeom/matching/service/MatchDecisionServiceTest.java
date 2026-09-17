@@ -193,4 +193,56 @@ class MatchDecisionServiceTest {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
         assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.PROPOSED);
     }
+
+    @Test
+    void 확정된_매칭은_예정_종료_시각이_지나면_ENDED로_전이되고_참가자가_해제된다() {
+        // 먼저 정상적으로 수락(CONFIRMED)까지 진행 — 이 시점엔 시각들이 전부 정상 범위라
+        // accept() 내부의 ensureRespondable() 검증(응답 기한 이내)을 그대로 통과한다.
+        matchDecisionService.accept(hostUserId, activityMatchId);
+        // accept()가 남긴 변경(status=CONFIRMED 등)을 DB에 반영해둔다 — 안 그러면 바로 아래
+        // entityManager.clear()가 아직 flush 안 된 이 변경을 DB 반영 전에 그냥 버려버린다.
+        entityManager.flush();
+
+        // created_at 기준으로 아주 가까운 미래(수 ms 뒤)로 decision_expires_at/scheduled_at/
+        // scheduled_end_at을 한꺼번에 당겨서 순서 제약(created_at < decision_expires_at <
+        // scheduled_at < scheduled_end_at)은 지키면서, 실행 시점엔 이미 다 지난 시각으로 만든다
+        // (pastDeadlineFor()와 동일한 이유 — Thread.sleep 없이 결정적으로 재현).
+        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
+                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET decision_expires_at = ?, scheduled_at = ?, scheduled_end_at = ?
+                WHERE id = ?
+                """,
+                createdAt.plusNanos(1_000_000), createdAt.plusNanos(2_000_000),
+                createdAt.plusNanos(3_000_000), activityMatchId
+        );
+        entityManager.clear();
+
+        matchDecisionService.endOverdueActivities();
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.ENDED);
+
+        // 게시글(MATCHED)은 그대로 둬야 한다 — 활동이 정상적으로 끝난 것뿐이라 SEARCHING으로
+        // 되돌릴 이유가 없다.
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.MATCHED);
+
+        // 반면 두 참가자는 반드시 release()돼서 다른 매칭에 다시 참여할 수 있어야 한다
+        // (이게 바로 팀원 리뷰로 발견된, released_at이 영원히 안 채워지던 문제).
+        var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
+        assertThat(participants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+    }
+
+    @Test
+    void 예정_종료_시각이_안_지난_확정_매칭은_자연종료_대상이_아니다() {
+        matchDecisionService.accept(hostUserId, activityMatchId);
+
+        matchDecisionService.endOverdueActivities();
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.CONFIRMED);
+    }
 }

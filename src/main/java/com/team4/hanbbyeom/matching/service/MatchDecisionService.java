@@ -137,6 +137,45 @@ public class MatchDecisionService {
         }
     }
 
+    // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 확정(CONFIRMED)된 활동 중
+    // 예정 종료 시각(scheduled_end_at)이 지난 건들을 ENDED로 자연 종료 처리한다.
+    // ⚠️ 이게 없으면 CONFIRMED로 끝난 매칭의 두 참가자는 released_at이 영원히 안 채워져서
+    // uq_participant_active_user 제약에 걸려 이후 어떤 매칭에도 다시 참여할 수 없게 된다
+    // (팀원 리뷰로 발견 — accept()가 의도적으로 release()를 안 부르는 대신, 활동이 끝나면
+    // 반드시 이 메서드가 대신 풀어줘야 한다는 전제였는데 그 후속 처리가 빠져 있었음).
+    @Transactional
+    public void endOverdueActivities() {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        OffsetDateTime now = OffsetDateTime.now();
+        var overdueMatches = activityMatchRepository.findByStatusAndScheduledEndAtBefore(
+                ActivityMatchStatus.CONFIRMED, now);
+
+        for (ActivityMatch activityMatch : overdueMatches) {
+            // 락을 잡은 이후에도 방금 다른 트랜잭션이 처리했을 수 있으니 방어적으로 재확인
+            if (activityMatch.getStatus() != ActivityMatchStatus.CONFIRMED) {
+                continue;
+            }
+            activityMatch.end();
+
+            // 게시글 상태(MATCHED)는 건드리지 않는다 — 활동이 정상적으로 끝난 것뿐이라
+            // reject()/expireOverdue()처럼 SEARCHING으로 되돌릴 이유가 없다. 여기서 필요한 건
+            // 오직 "두 참가자를 다시 매칭 가능한 상태로 풀어주는" release()뿐이다.
+            var participants = matchParticipantRepository.findByActivityMatchId(activityMatch.getId());
+            MatchParticipant host = participants.stream()
+                    .filter(p -> "A".equals(p.getSlot()))
+                    .findFirst()
+                    .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+            MatchParticipant applicant = participants.stream()
+                    .filter(p -> "B".equals(p.getSlot()))
+                    .findFirst()
+                    .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+
+            host.release();
+            applicant.release();
+        }
+    }
+
     // accept()/reject() 공통 — 응답 가능한 상태인지 검증한다. status가 PROPOSED가 아니거나
     // (이미 CONFIRMED/REJECTED/EXPIRED), 상태는 아직 PROPOSED라도 decisionExpiresAt이 이미
     // 지났으면(1분 주기 스케줄러가 아직 못 돈 사이) 응답을 막는다. 리뷰 피드백 반영:

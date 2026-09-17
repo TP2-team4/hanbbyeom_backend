@@ -15,4 +15,9 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
     // 스케줄러(MatchExpireScheduler)가 자동 만료 대상을 찾을 때 쓴다.
     // status=PROPOSED(아직 호스트 응답 대기 중)이면서 decisionExpiresAt이 now보다 과거인 건들.
     List<ActivityMatch> findByStatusAndDecisionExpiresAtBefore(ActivityMatchStatus status, OffsetDateTime now);
+
+    // 스케줄러가 자연 종료 대상을 찾을 때 쓴다.
+    // status=CONFIRMED(확정됨)이면서 scheduledEndAt이 now보다 과거인 건들 — 활동 시간이
+    // 이미 지났는데 아직 ENDED로 전이 안 된 매칭들이다.
+    List<ActivityMatch> findByStatusAndScheduledEndAtBefore(ActivityMatchStatus status, OffsetDateTime now);
 }

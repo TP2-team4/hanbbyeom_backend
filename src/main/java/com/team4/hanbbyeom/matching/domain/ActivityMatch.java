@@ -113,4 +113,13 @@ public class ActivityMatch {
         this.status = ActivityMatchStatus.EXPIRED;
         this.closedAt = OffsetDateTime.now();
     }
+
+    // 확정(CONFIRMED)된 활동이 예정 종료 시각(scheduled_end_at)을 지나 자연 종료됐을 때 호출.
+    // expire()와 마찬가지로 시스템이 자동으로 처리하는 것이라 closedByUserId는 남기지 않는다.
+    // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다 — 안 그러면 확정된 매칭의
+    // 두 참가자는 uq_participant_active_user 제약에 걸려 영원히 다른 매칭에 못 들어간다.
+    public void end() {
+        this.status = ActivityMatchStatus.ENDED;
+        this.closedAt = OffsetDateTime.now();
+    }
 }
