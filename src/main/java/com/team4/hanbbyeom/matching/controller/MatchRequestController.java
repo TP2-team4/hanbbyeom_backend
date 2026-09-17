@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.matching.controller;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
+import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +52,18 @@ public class MatchRequestController {
             @RequestHeader("X-USER-ID") Long currentUserId
     ) {
         return matchRequestBoardService.getDetail(id, currentUserId);
+    }
+
+    // 내 게시글에 온 대기 중인 신청 1건 조회 — applicant-profile, accept/reject
+    // API와 이어서 쓰기 위한 activityMatchId를 내려준다. 대기 중인 신청이 없으면 404.
+    @Operation(summary = "대기 중인 신청 조회",
+            description = "본인 게시글에 온 응답 대기 중(PROPOSED)인 신청 1건을 조회합니다. 없으면 404가 반환됩니다.")
+    @GetMapping("/{id}/pending-application")
+    public PendingApplicationResponse getPendingApplication(
+            @PathVariable Long id,
+            @RequestHeader("X-USER-ID") Long currentUserId
+    ) {
+        return matchRequestBoardService.getPendingApplication(currentUserId, id);
     }
 
     // 모집글 수정 — 요청 바디(MatchRequestUpdateRequest)엔 일정(scheduledAt)과 대화 수준만

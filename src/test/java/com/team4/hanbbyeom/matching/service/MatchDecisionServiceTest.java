@@ -1,0 +1,146 @@
+package com.team4.hanbbyeom.matching.service;
+
+import com.team4.hanbbyeom.matching.domain.*;
+import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
+import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.OffsetDateTime;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+@SpringBootTest
+@Transactional
+class MatchDecisionServiceTest {
+
+    @Autowired private MatchDecisionService matchDecisionService;
+    @Autowired private MatchApplyService matchApplyService;
+    @Autowired private MatchRequestRepository matchRequestRepository;
+    @Autowired private MatchParticipantRepository matchParticipantRepository;
+    @Autowired private ActivityMatchRepository activityMatchRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
+
+    private Long hostUserId, applicantUserId, hostRequestId, activityMatchId;
+
+    @BeforeEach
+    void setUp() {
+        hostUserId = createUser("host");
+        applicantUserId = createUser("applicant");
+
+        Long courseId = jdbcTemplate.queryForObject(
+                "SELECT id FROM running_course WHERE name = ? LIMIT 1", Long.class, "뚝섬 한강공원");
+
+        MatchRequest hostRequest = new MatchRequest(
+                hostUserId, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT,
+                OffsetDateTime.now().plusHours(9)
+        );
+        hostRequestId = matchRequestRepository.save(hostRequest).getId();
+
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                hostRequestId, courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
+        );
+
+        // 신청까지 미리 진행해서 PROPOSED 상태의 activityMatch를 만들어둔다
+        activityMatchId = matchApplyService.apply(applicantUserId, hostRequestId);
+    }
+
+    private Long createUser(String label) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
+                Long.class,
+                label + "-" + System.nanoTime() + "@example.com", "dummy-hash", label, OffsetDateTime.now()
+        );
+    }
+
+    @Test
+    void 호스트가_수락하면_CONFIRMED로_전이되고_meeting_code가_발급된다() {
+        MatchConfirmResponse response = matchDecisionService.accept(hostUserId, activityMatchId);
+
+        assertThat(response.activityMatchId()).isEqualTo(activityMatchId);
+        assertThat(response.meetingCode()).hasSize(6);
+        assertThat(response.confirmedAt()).isNotNull();
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.CONFIRMED);
+
+        MatchRequest updatedHost = matchRequestRepository.findById(hostRequestId).orElseThrow();
+        assertThat(updatedHost.getStatus()).isEqualTo(MatchRequestStatus.MATCHED);
+    }
+
+    @Test
+    void 호스트가_아닌_사람이_수락하면_예외가_발생한다() {
+        assertThatThrownBy(() -> matchDecisionService.accept(applicantUserId, activityMatchId))
+                .isInstanceOf(NotMatchParticipantException.class);
+    }
+
+    @Test
+    void 이미_응답한_매칭을_다시_수락하면_예외가_발생한다() {
+        matchDecisionService.accept(hostUserId, activityMatchId);
+
+        assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
+
+    @Test
+    void 호스트가_거절하면_REJECTED로_전이되고_게시글이_SEARCHING으로_복귀한다() {
+        matchDecisionService.reject(hostUserId, activityMatchId);
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.REJECTED);
+
+        MatchRequest updatedHost = matchRequestRepository.findById(hostRequestId).orElseThrow();
+        assertThat(updatedHost.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    @Test
+    void 거절하면_두_참여_연결_모두_해제된다() {
+        matchDecisionService.reject(hostUserId, activityMatchId);
+
+        var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
+        assertThat(participants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+    }
+
+    @Test
+    void 응답_기한이_지난_매칭은_자동으로_EXPIRED_처리된다() throws InterruptedException {
+        // decisionExpiresAt을 "지금"으로 당겨두고 잠깐 대기해서, expireOverdue() 안의
+        // now()가 이 값보다 뒤가 되도록 만든다(진짜 과거로 세팅하면 created_at보다도 앞서게
+        // 돼서 chk_activity_match_time 제약에 걸림).
+        OffsetDateTime justPassed = OffsetDateTime.now();
+        jdbcTemplate.update(
+                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
+                justPassed, activityMatchId
+        );
+        Thread.sleep(20);
+
+        matchDecisionService.expireOverdue();
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.EXPIRED);
+
+        MatchRequest updatedHost = matchRequestRepository.findById(hostRequestId).orElseThrow();
+        assertThat(updatedHost.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    @Test
+    void 응답_기한이_안_지난_매칭은_자동만료_대상이_아니다() {
+        matchDecisionService.expireOverdue();
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.PROPOSED);
+    }
+}

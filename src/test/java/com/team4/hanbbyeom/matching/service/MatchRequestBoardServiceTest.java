@@ -4,18 +4,22 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
+import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -25,6 +29,8 @@ class MatchRequestBoardServiceTest {
     private MatchRequestBoardService matchRequestBoardService;
     @Autowired
     private MatchRequestRepository matchRequestRepository;
+    @Autowired
+    private MatchApplyService matchApplyService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -47,8 +53,11 @@ class MatchRequestBoardServiceTest {
                 Long.class, "뚝섬 한강공원"
         );
 
+        // scheduledAt은 48시간 뒤로 잡는다 — MatchApplyService.apply()의 24시간 응답 대기
+        // 기한(DECISION_WINDOW_HOURS)보다 넉넉히 뒤여야 getPendingApplication() 테스트에서
+        // apply()가 "활동 시작 시각이 너무 임박함" 예외 없이 성공한다.
         MatchRequest matchRequest = new MatchRequest(
-                testUserId, OffsetDateTime.now().plusHours(5), TalkLevel.LIGHT_CHAT,
+                testUserId, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT,
                 OffsetDateTime.now().plusHours(4)
         );
         testMatchRequestId = matchRequestRepository.save(matchRequest).getId();
@@ -125,5 +134,33 @@ class MatchRequestBoardServiceTest {
         assertThat(response.distanceMinMeters()).isEqualTo(5000);
         assertThat(response.distanceMaxMeters()).isEqualTo(8000);
         assertThat(response.isOwner()).isTrue();
+    }
+
+    @Test
+    void 대기중인_신청이_있으면_activityMatchId를_반환한다() {
+        Long applicantUserId = jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
+                Long.class,
+                "applicant-" + System.nanoTime() + "@example.com", "dummy-hash", "신청자", OffsetDateTime.now()
+        );
+        Long activityMatchId = matchApplyService.apply(applicantUserId, testMatchRequestId);
+
+        PendingApplicationResponse response =
+                matchRequestBoardService.getPendingApplication(testUserId, testMatchRequestId);
+
+        assertThat(response.activityMatchId()).isEqualTo(activityMatchId);
+        assertThat(response.decisionExpiresAt()).isNotNull();
+    }
+
+    @Test
+    void 본인_게시글이_아니면_조회_시도시_예외가_발생한다() {
+        assertThatThrownBy(() -> matchRequestBoardService.getPendingApplication(testUserId + 1, testMatchRequestId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void 대기중인_신청이_없으면_예외가_발생한다() {
+        assertThatThrownBy(() -> matchRequestBoardService.getPendingApplication(testUserId, testMatchRequestId))
+                .isInstanceOf(NotMatchParticipantException.class);
     }
 }
