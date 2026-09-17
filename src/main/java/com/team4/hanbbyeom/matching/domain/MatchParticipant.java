@@ -54,6 +54,7 @@ public class MatchParticipant {
     public Long getUserId() { return userId; }
     public String getSlot() { return slot; }
     public AcceptStatus getAcceptStatus() { return acceptStatus; }
+    public OffsetDateTime getReleasedAt() { return releasedAt; }
 
     public void accept() {
         this.acceptStatus = AcceptStatus.ACCEPTED;
@@ -63,5 +64,13 @@ public class MatchParticipant {
     public void reject() {
         this.acceptStatus = AcceptStatus.REJECTED;
         this.respondedAt = OffsetDateTime.now();
+    }
+
+    // 이 참여 연결을 "끝난" 상태로 표시 — released_at이 채워져야 uq_participant_active_user/
+    // uq_participant_active_request 부분 유니크 인덱스에서 빠져서, 이 유저(또는 이 게시글)가
+    // 다음 매칭에 다시 참여할 수 있게 된다. CONFIRMED(확정)는 아직 활동이 안 끝났으므로 호출하면
+    // 안 되고, REJECTED/EXPIRED/CANCELLED처럼 매칭이 성사되지 않고 끝났을 때만 호출한다.
+    public void release() {
+        this.releasedAt = OffsetDateTime.now();
     }
 }

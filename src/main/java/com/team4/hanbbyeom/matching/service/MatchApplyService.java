@@ -149,6 +149,12 @@ public class MatchApplyService {
         //    호스트 거절과 같은 reject()를 재사용한다("제안이 무산됨"이라는 결과는 동일하므로).
         activityMatch.reject(applicantUserId); // REJECTED 재사용 — 신청자 취소도 "제안이 무산됨"이라는 점은 동일
 
+        // 6-1) 매칭이 무산됐으므로 두 참여 연결 모두 해제 — 안 하면 released_at이 계속 null로
+        //      남아서 uq_participant_active_user 부분 유니크 인덱스에 걸려 이 두 사람이 다시는
+        //      매칭에 참여할 수 없게 된다.
+        host.release();
+        applicant.release();
+
         // 7) 호스트 게시글은 다시 모집 중(SEARCHING)으로 되돌려서 다른 사람이 신청할 수 있게 한다.
         MatchRequest hostRequest = matchRequestRepository.findById(host.getMatchRequestId())
                 .orElseThrow(() -> new MatchRequestNotFoundException(host.getMatchRequestId()));

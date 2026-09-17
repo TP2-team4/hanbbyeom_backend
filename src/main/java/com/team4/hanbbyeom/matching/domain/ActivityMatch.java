@@ -107,4 +107,10 @@ public class ActivityMatch {
         this.closedAt = OffsetDateTime.now();
         this.closedByUserId = closedByUserId;
     }
+
+    // 응답 기한(decision_expires_at)을 넘겨 시스템이 자동으로 만료시킬 때 호출.
+    public void expire() {
+        this.status = ActivityMatchStatus.EXPIRED;
+        this.closedAt = OffsetDateTime.now();
+    }
 }

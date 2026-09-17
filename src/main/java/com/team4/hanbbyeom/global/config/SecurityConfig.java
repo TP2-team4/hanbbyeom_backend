@@ -1,7 +1,15 @@
 package com.team4.hanbbyeom.global.config;
 
+import com.team4.hanbbyeom.global.security.CustomUserDetailsService;
+import com.team4.hanbbyeom.global.security.jwt.JwtAuthenticationEntryPoint;
+import com.team4.hanbbyeom.global.security.jwt.JwtAuthenticationFilter;
+import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -9,6 +17,15 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 // Spring Security: 누가 우리 서버에 접근할 수 있는지를 관리해주는 Spring의 보안 프레임워크 (API 접근 권한 관리)
 // build.gradle에 spring-boot-starter-security 의존성이 있으면,
@@ -19,13 +36,16 @@ import org.springframework.security.web.SecurityFilterChain;
 // 인가(Authorization): 확인한 대상의 권한 확인
 
 // Spring Security 요청 인가 설정
-// 인증 관련 API                 /api/auth/**        누구나 접근 가능
-// 러닝 코스 조회 API            /api/run/courses     누구나 접근 가능
-// 스웨거 UI 진입 경로            /swagger-ui.html    누구나 접근 가능
-// 스웨거 UI 정적 리소스          /swagger-ui/**      누구나 접근 가능
-// 스웨거 API 명세 데이터 제공     /v3/api-docs/**     누구나 접근 가능
-// 오류 최종 처리 에러 경로        /error              누구나 접근 가능
-// 그 외 API                                        로그인/인증된 사용자만 접근 가능
+// 회원가입              POST /api/auth/signup                      누구나 접근 가능
+// 로그인                POST /api/auth/login                       누구나 접근 가능
+// 이메일 인증 코드 발송   POST /api/auth/email-verifications          누구나 접근 가능
+// 이메일 인증 코드 확인   POST /api/auth/email-verifications/confirm  누구나 접근 가능
+// 러닝 코스 목록 조회     GET  /api/run/courses                      누구나 접근 가능
+// 스웨거 UI 진입 경로          /swagger-ui.html                      누구나 접근 가능
+// 스웨거 UI 정적 리소스        /swagger-ui/**                        누구나 접근 가능
+// 스웨거 API 명세 데이터 제공   /v3/api-docs/**                       누구나 접근 가능
+// 오류 최종 처리 에러 경로      /error                                누구나 접근 가능
+// 그 외 API                                                        로그인/인증된 사용자만 접근 가능
 
 @Configuration
 public class SecurityConfig {
@@ -54,13 +74,97 @@ public class SecurityConfig {
         return configuration.getAuthenticationManager();
     }
 
-    // 회원가입, 이메일 인증처럼 로그인 전에 호출해야 하는 API는 인증 없이 접근 가능해야 함
-    // (임시) JWT 기반 요청 인증(#3)이 추가되기 전까지 /api/auth/** 전체를 공개 처리
+    // CORS(Cross-Origin Resource Sharing): 브라우저가 "지금 보고 있는 사이트 주소"와 다른 주소로
+    // 요청을 보낼 때, 그 요청을 허용할지 서버가 응답 헤더로 알려주는 규칙
+    // → 프론트엔드(예: http://localhost:5173)와 백엔드(http://localhost:8080)는 주소가 다르므로,
+    //   허용해주지 않으면 브라우저가 응답을 받고도 JavaScript에 넘겨주지 않고 막아버림
+    //   (Postman·Swagger에서는 브라우저 규칙이 적용되지 않아 이 설정 없이도 잘 됨)
+
+    // CorsConfigurationSource: (Spring 제공) 어떤 경로에 어떤 CORS 규칙을 적용할지 담아두는 객체
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            // application.yaml의 app.cors.allowed-origins 값을 목록으로 받음 (쉼표로 구분)
+            // 설정값이 하나뿐이라 JwtProperties 같은 전용 클래스 없이 @Value로 직접 주입
+            @Value("${app.cors.allowed-origins}") List<String> allowedOrigins
+    ) {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        // 요청을 허용할 프론트엔드 주소 (배포 시 .env의 CORS_ALLOWED_ORIGINS로 실제 주소 지정)
+        configuration.setAllowedOrigins(allowedOrigins);
+
+        // 우리 API가 사용하는 HTTP 메서드
+        // OPTIONS: 브라우저가 본 요청 전에 "이 요청 보내도 되냐"고 먼저 물어보는 preflight 요청용
+        configuration.setAllowedMethods(
+                List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
+
+        // 클라이언트가 보내도 되는 요청 헤더
+        // Authorization: Access Token, Content-Type: JSON 본문 전송용
+        configuration.setAllowedHeaders(
+                List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+
+        // 브라우저 JavaScript가 응답에서 꺼내 읽을 수 있도록 허용할 헤더
+        // → 이 목록에 없으면 응답에 헤더가 있어도 JavaScript에서는 보이지 않음
+        // Location: 201 Created 응답에서 새로 만들어진 리소스 주소를 읽기 위해
+        // WWW-Authenticate: 401이 "토큰 없음"인지 "토큰이 잘못됨(invalid_token)"인지 구분하기 위해
+        configuration.setExposedHeaders(
+                List.of(HttpHeaders.LOCATION, HttpHeaders.WWW_AUTHENTICATE));
+
+        // 쿠키·인증 정보를 자동으로 실어 보낼지 여부
+        // 지금은 Access Token을 Authorization 헤더로 직접 담아 보내므로 필요 없음
+        // 주의(#4): Refresh Token을 HttpOnly Cookie로 전환하면 true로 바꿔야 하고,
+        //          그때는 Origin에 와일드카드(*)를 쓸 수 없으므로 주소를 정확히 지정해야 함
+        configuration.setAllowCredentials(false);
+
+        // 위 규칙을 적용할 경로 등록
+        // 브라우저가 호출하는 건 API뿐이므로 /api/** 로 한정 (Swagger는 같은 주소에서 열려 CORS 대상 아님)
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", configuration);
+
+        return source;
+    }
+
+    // 로그인 전에 호출해야 하는 API(회원가입·로그인·이메일 인증)와 공개 데이터 조회 API만 열어두고,
+    // 나머지는 전부 Access Token이 있어야 접근 가능
+
+    // "/api/auth/**"처럼 넓은 패턴을 쓰지 않고 경로와 HTTP 메서드를 하나씩 지정하는 이유
+    // → 나중에 /api/auth/logout, /api/auth/refresh처럼 인증이 필요한 API가 추가됐을 때
+    //   의도치 않게 자동으로 공개되어 버리는 것을 막기 위함
+    //   (같은 조건 객체를 JWT 필터 제외 판단에도 그대로 전달)
 
     // SecurityFilterChain: 클라이언트 요청을 Controller로 보내기 전 거치는 보안필터들의 체인
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            // 아래 세 Bean은 JwtAuthenticationFilter를 직접 생성해서 체인에 끼워 넣기 위해 주입받음
+            JwtTokenProvider jwtTokenProvider,
+            CustomUserDetailsService customUserDetailsService,
+            JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint
+    ) throws Exception {
+        // 인증 없이 접근할 수 있고 JWT 필터도 실행하지 않을 공개 API 조건
+        // 같은 RequestMatcher를 permitAll과 필터 제외 판단에 함께 사용해 두 정책의 불일치를 방지
+
+        // 주의: 공개 API를 추가할 때는 반드시 이 목록에 넣어야 함
+        // → 아래 permitAll 줄에만 따로 추가하면 인가만 열리고 JWT 필터는 계속 실행되므로,
+        //   만료된 토큰이 헤더에 남아 있을 때 공개 API인데도 401이 나감
+        // (swagger-ui·/v3/api-docs·/error는 이 목록 밖이지만, 브라우저가 해당 경로에
+        //  Authorization 헤더를 붙이지 않고 /error는 필터가 기본적으로 건너뛰므로 문제되지 않음)
+        RequestMatcher publicApiMatcher = new OrRequestMatcher(
+                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/signup"),
+                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/login"),
+                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications"),
+                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications/confirm"),
+                PathPatternRequestMatcher.pathPattern(HttpMethod.GET, "/api/run/courses")
+        );
+
         http
+                // cors: 위에서 등록한 CorsConfigurationSource Bean을 찾아 CORS 처리를 활성화
+                // → preflight(OPTIONS) 요청은 인가 판정 전에 처리되므로,
+                //   anyRequest().authenticated() 규칙 때문에 401이 나는 일이 없음
+                // 참고: Spring Security는 UrlBasedCorsConfigurationSource Bean이 있으면 이 설정을
+                //      자동으로 적용하므로 이 줄이 없어도 동작하지만, 필터 체인 구성만 봐도
+                //      CORS가 적용된다는 걸 알 수 있도록 명시적으로 남겨둠
+                .cors(Customizer.withDefaults())
+
                 // CSRF 보호 비활성화
                 // Access Token을 Authorization 헤더로 직접 실어 보내는 방식이라 브라우저가 자동으로
                 // 인증 정보를 실어 보내지 않음 → 공격자 사이트가 요청을 흉내 낼 수 없어 CSRF 위험 없음
@@ -70,18 +174,18 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
 
                 // sessionManagement: Spring Security의 Session 관리 방식을 설정
-                // 매 요청마다 JWT Access Token을 검증하는 Stateless 인증 방식 사용을 위한 세팅 (#3에서 작업할 JWT 기반 인증 방식)
+                // 매 요청마다 JWT Access Token을 검증하는 Stateless 인증 방식을 위한 세팅
                 .sessionManagement(session ->
                         // STATELESS: 로그인 상태를 서버의 HTTP 세션에 저장해서 관리하지 않음
+                        // → 요청이 끝나면 인증 정보가 남지 않으므로, 매 요청마다 토큰으로 다시 인증해야 함
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 // authorizeHttpRequests: URL별 접근 권한 설정
                 // Spring이 권한 설정 객체를 넘기고, 그걸 auth라는 변수로 받아서 아래 설정들을 붙임
                 .authorizeHttpRequests(auth -> auth
-                        // requestMatchers(...): 이 URL 패턴에 해당하는 요청을 선택
+                        // requestMatchers(HTTP 메서드, 경로): 이 메서드와 경로에 해당하는 요청을 선택
                         // permitAll(): 인증 여부와 관계없이 모두 접근 허용
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/run/courses").permitAll()
+                        .requestMatchers(publicApiMatcher).permitAll()
                         .requestMatchers(
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
@@ -92,6 +196,29 @@ public class SecurityConfig {
                         // anyRequest: 앞에서 지정하지 않은 나머지 모든 요청
                         // authenticated: 인증된 사용자만 접근 가능
                         .anyRequest().authenticated()
+                )
+
+                // exceptionHandling: 인증·인가 실패 시 어떤 응답을 돌려줄지 설정
+                // authenticationEntryPoint: "인증이 안 된 사용자가 보호 API에 접근"했을 때 호출됨
+                // → 등록하지 않으면 Spring 기본 동작(빈 본문 + 403)이 나가므로, 공통 401 형식으로 바꿔줌
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(jwtAuthenticationEntryPoint))
+
+                // addFilterBefore(끼워 넣을 필터, 이 필터 앞에): 보안 필터 체인의 원하는 위치에 필터를 추가
+                // UsernamePasswordAuthenticationFilter 앞에 두는 이유
+                // → 인가 판정(AuthorizationFilter)보다 먼저 실행되어야 SecurityContext에 인증 정보를 넣을 수 있음
+
+                // JwtAuthenticationFilter에 @Component를 붙이지 않고 여기서 직접 생성하는 이유
+                // → Filter 타입 Bean은 Spring Boot가 서블릿 컨테이너에도 자동 등록해서
+                //   Security 체인 밖에서 한 번 더 실행되는 문제가 생길 수 있음
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(
+                                jwtTokenProvider,
+                                customUserDetailsService,
+                                jwtAuthenticationEntryPoint,
+                                publicApiMatcher
+                        ),
+                        UsernamePasswordAuthenticationFilter.class
                 );
 
         // 지금까지 설정한 것들을 기반으로 실제 SecurityFilterChain 객체를 만들어서 반환

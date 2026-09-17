@@ -1,28 +1,38 @@
 package com.team4.hanbbyeom.matching.controller;
 
+import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
+import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @Tag(name = "Matching - Matches", description = "확정 매칭(activity_match) 관련 API")
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/matching/matches")
 public class ActivityMatchController {
 
     private final MatchParticipantRepository matchParticipantRepository;
     private final TrustProfileLookupService trustProfileLookupService;
+    private final MatchDecisionService matchDecisionService;
 
     public ActivityMatchController(MatchParticipantRepository matchParticipantRepository,
-                                   TrustProfileLookupService trustProfileLookupService) {
+                                   TrustProfileLookupService trustProfileLookupService, MatchDecisionService matchDecisionService) {
         this.matchParticipantRepository = matchParticipantRepository;
         this.trustProfileLookupService = trustProfileLookupService;
+        this.matchDecisionService = matchDecisionService;
     }
 
     // activityMatchId에 신청한 사람(slot B)의 신뢰도 프로필 조회 — 이 매칭의 호스트(slot A)
@@ -32,8 +42,12 @@ public class ActivityMatchController {
     @GetMapping("/{activityMatchId}/applicant-profile")
     public TrustProfileResponse getApplicantProfile(
             @PathVariable Long activityMatchId,
-            @RequestHeader("X-USER-ID") Long currentUserId // TODO: 담당 A 인증 방식으로 교체
+            // @AuthenticationPrincipal: JWT 인증 필터가 SecurityContext에 넣어둔 인증된 사용자 정보
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
+        // 아래 호스트 본인 확인에서 사용하므로 사용자 id를 먼저 꺼내둠
+        Long currentUserId = principal.getUserId();
+
         List<MatchParticipant> participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
 
         MatchParticipant host = participants.stream()
@@ -52,5 +66,29 @@ public class ActivityMatchController {
                 .orElseThrow(() -> new NotMatchParticipantException("아직 신청자가 없어요."));
 
         return trustProfileLookupService.lookup(applicant.getUserId());
+    }
+
+    // 호스트 수락 — CONFIRMED 전이 + meeting_code 발급 + 양쪽 게시글 MATCHED(신청자는
+    // 본인 게시글이 있을 때만). 호스트 본인만 호출 가능, PROPOSED 상태일 때만 성공.
+    @Operation(summary = "매칭 수락",
+            description = "호스트 본인만 호출할 수 있습니다. 이미 응답했거나 종료된 매칭이면 409가 반환됩니다.")
+    @PostMapping("/{activityMatchId}/accept")
+    public MatchConfirmResponse accept(
+            @PathVariable Long activityMatchId,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return matchDecisionService.accept(principal.getUserId(), activityMatchId);
+    }
+
+    // 호스트 거절 — REJECTED 전이 + 양쪽 게시글 SEARCHING 복귀(신청자는 있을 때만).
+    @Operation(summary = "매칭 거절",
+            description = "호스트 본인만 호출할 수 있습니다. 이미 응답했거나 종료된 매칭이면 409가 반환됩니다.")
+    @PostMapping("/{activityMatchId}/reject")
+    public ResponseEntity<Void> reject(
+            @PathVariable Long activityMatchId,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        matchDecisionService.reject(principal.getUserId(), activityMatchId);
+        return ResponseEntity.noContent().build();
     }
 }
