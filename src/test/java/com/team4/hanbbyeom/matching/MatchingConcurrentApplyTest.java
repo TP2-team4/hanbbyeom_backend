@@ -44,7 +44,6 @@ class MatchingConcurrentApplyTest {
 
     private final List<Long> createdUserIds = new ArrayList<>();
     private Long hostRequestId;
-    private Long confirmedActivityMatchId;
 
     private Long createUser(String label) {
         Long id = jdbcTemplate.queryForObject(
@@ -63,11 +62,21 @@ class MatchingConcurrentApplyTest {
     @AfterEach
     void cleanUp() {
         // 여긴 @Transactional 롤백이 없으므로, 커밋된 테스트 데이터를 자식 테이블부터 직접 지운다.
-        if (confirmedActivityMatchId != null) {
-            jdbcTemplate.update("DELETE FROM match_participant WHERE activity_match_id = ?", confirmedActivityMatchId);
-            jdbcTemplate.update("DELETE FROM activity_match WHERE id = ?", confirmedActivityMatchId);
-        }
+        //
+        // activity_match id를 테스트 성공/실패 결과(assertion)에 의존해서 기록해두지 않고,
+        // 매번 DB에서 hostRequestId로 다시 조회한다 — 동시성 버그로 두 신청이 모두 성공해서
+        // activity_match가 2건 생겼거나, assertion이 먼저 실패해서 그 기록 코드 자체가 실행 안
+        // 됐어도, 여기선 항상 실제로 남아있는 걸 전부 찾아서 지울 수 있다(리뷰로 발견됨 —
+        // 이 테스트가 정작 자신이 잡으려는 회귀가 터졌을 때 스스로 정리를 못 하는 문제였음).
         if (hostRequestId != null) {
+            List<Long> activityMatchIds = jdbcTemplate.queryForList(
+                    "SELECT DISTINCT activity_match_id FROM match_participant WHERE match_request_id = ?",
+                    Long.class, hostRequestId
+            );
+            for (Long activityMatchId : activityMatchIds) {
+                jdbcTemplate.update("DELETE FROM match_participant WHERE activity_match_id = ?", activityMatchId);
+                jdbcTemplate.update("DELETE FROM activity_match WHERE id = ?", activityMatchId);
+            }
             jdbcTemplate.update("DELETE FROM run_match_condition WHERE match_request_id = ?", hostRequestId);
             jdbcTemplate.update("DELETE FROM match_request WHERE id = ?", hostRequestId);
         }
@@ -105,14 +114,25 @@ class MatchingConcurrentApplyTest {
             var future1 = executor.submit(attempt1);
             var future2 = executor.submit(attempt2);
 
-            // 두 스레드 모두 신청 직전(start 대기 상태)까지 진입한 걸 확인한 뒤 동시에 출발시킨다
+            // 두 스레드 모두 신청 직전(start 대기 상태)까지 진입한 걸 확인한 뒤 동시에 출발시킨다.
+            // 이 assertThat이 실패하면(스레드가 제때 ready 못 함) 아래 start.countDown()이
+            // 실행되기 전에 예외가 던져져서, 이미 start.await()에 걸려 있는 작업 스레드들이
+            // 영원히 못 깨어날 수 있다 — finally에서 무조건 latch를 풀고 강제 종료해야 한다
+            // (리뷰로 발견됨).
             assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
             start.countDown();
 
             future1.get(5, TimeUnit.SECONDS);
             future2.get(5, TimeUnit.SECONDS);
         } finally {
-            executor.shutdown();
+            // 위에서 무슨 이유로 일찍 빠져나가든(assertion 실패 포함), 대기 중인 스레드를 먼저
+            // 깨우고(start.countDown()은 여러 번 불러도 안전 — CountDownLatch는 0 밑으로 안 내려감)
+            // shutdownNow()로 인터럽트를 걸어 강제 종료한 뒤, 실제로 끝날 때까지 기다린다.
+            // shutdown()만으로는 이미 실행 중인(=start.await()에 걸린) 작업을 못 끊어서
+            // 테스트 JVM이 안 끝날 수 있었다(리뷰로 발견됨).
+            start.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
         }
 
         List<Object> results = List.of(result1.get(), result2.get());
@@ -122,11 +142,6 @@ class MatchingConcurrentApplyTest {
         // 정확히 한쪽만 성공(activityMatchId 반환)하고, 다른 한쪽은 "이미 마감된 모집글" 예외로 거부돼야 한다
         assertThat(successCount).isEqualTo(1);
         assertThat(conflictCount).isEqualTo(1);
-
-        results.stream()
-                .filter(r -> r instanceof Long)
-                .findFirst()
-                .ifPresent(id -> confirmedActivityMatchId = (Long) id);
 
         assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
                 .isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
