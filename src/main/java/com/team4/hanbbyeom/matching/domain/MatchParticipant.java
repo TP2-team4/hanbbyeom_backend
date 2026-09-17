@@ -54,6 +54,7 @@ public class MatchParticipant {
     public Long getUserId() { return userId; }
     public String getSlot() { return slot; }
     public AcceptStatus getAcceptStatus() { return acceptStatus; }
+    public OffsetDateTime getReleasedAt() { return releasedAt; }
 
     public void accept() {
         this.acceptStatus = AcceptStatus.ACCEPTED;
@@ -63,5 +64,15 @@ public class MatchParticipant {
     public void reject() {
         this.acceptStatus = AcceptStatus.REJECTED;
         this.respondedAt = OffsetDateTime.now();
+    }
+
+    // 이 참여 연결을 "끝난" 상태로 표시 — released_at이 채워져야 uq_participant_active_user/
+    // uq_participant_active_request 부분 유니크 인덱스에서 빠져서, 이 유저(또는 이 게시글)가
+    // 다음 매칭에 다시 참여할 수 있게 된다. REJECTED/EXPIRED/CANCELLED(매칭이 성사되지 않고
+    // 끝난 경우)뿐 아니라, CONFIRMED로 성사된 뒤 활동이 실제로 끝나 ENDED로 전이될 때도
+    // 호출한다(MatchDecisionService.endOverdueActivities()). 반대로 activity_match가
+    // 아직 CONFIRMED인 동안(=활동이 아직 안 끝난 상태)에는 호출하면 안 된다.
+    public void release() {
+        this.releasedAt = OffsetDateTime.now();
     }
 }

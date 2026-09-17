@@ -33,6 +33,14 @@ public class CustomUserDetails implements UserDetails {
         return user.getId();
     }
 
+    // 감싸고 있는 User Entity를 그대로 꺼내는 메서드
+    // 인증 과정(JwtAuthenticationFilter)에서 이미 DB 조회를 마친 User이므로,
+    // Controller가 같은 사용자를 다시 조회할 필요 없이 이 객체를 그대로 사용하면 됨
+    // → 내 정보 조회(GET /api/users/me)처럼 본인 정보를 응답할 때 사용
+    public User getUser() {
+        return user;
+    }
+
     // 로그인 식별자
     // Spring Security에서 username은 이름이 아니라 로그인에 사용하는 식별자를 뜻함
     // → 우리 서비스는 이메일로 로그인하므로 이메일을 반환

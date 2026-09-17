@@ -1,0 +1,69 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    # t3.micro(메모리 1GB) 기준 app/db/OS가 나눠 써야 하므로 명시적으로 제한.
+    # 이게 없으면 app 컨테이너의 -XX:MaxRAMPercentage가 호스트 전체 메모리 기준으로
+    # 계산되어(1GB의 75%) OOM 방지 효과가 사실상 없어짐.
+    mem_limit: 300m
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    # 평소엔 APP_IMAGE_TAG를 비워두면 latest로 동작(지금과 동일).
+    # 롤백 필요 시 EC2의 .env에 APP_IMAGE_TAG=<커밋 해시>만 추가하고
+    # docker compose up -d 하면 됨 — 이 추적 파일은 건드리지 않음.
+    image: shppark/hanbbyeom-backend:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # 이 제한이 있어야 Dockerfile의 -XX:MaxRAMPercentage=75.0이 "이 컨테이너에 할당된
+    # 500m의 75%(~375MB)"를 힙으로 쓰겠다는 뜻이 됨. db(300m) + app(500m) = 800m로
+    # t3.micro 1GB 안에서 OS/Docker 데몬용 여유(~200m)를 남겨둠.
+    mem_limit: 500m
+    depends_on:
+      db:
+        condition: service_healthy
+    # 이제 외부 진입점은 caddy(443/80)만 사용. app은 compose 내부 네트워크에서만
+    # "app:8080"으로 접근되면 충분해서 호스트에 직접 포트를 열지 않음(공격 표면 축소).
+    expose:
+      - "8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET_BASE64: ${JWT_SECRET_BASE64}
+      JWT_ACCESS_TOKEN_EXPIRATION: ${JWT_ACCESS_TOKEN_EXPIRATION}
+      EMAIL_VERIFICATION_HMAC_SECRET_BASE64: ${EMAIL_VERIFICATION_HMAC_SECRET_BASE64}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    mem_limit: 100m
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

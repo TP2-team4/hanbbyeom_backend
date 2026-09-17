@@ -69,6 +69,10 @@ spring:
 server:
   # SERVER_PORT가 없으면 기본 포트 8080으로 실행
   port: ${SERVER_PORT:8080}
+  # 리버스 프록시(Caddy) 뒤에서 동작하므로 X-Forwarded-* 헤더를 신뢰해
+  # 원래 요청이 https였다는 것을 인식하도록 함 (안 하면 Swagger가 http:// URL을 생성해
+  # HTTPS 페이지에서 mixed content로 막힘)
+  forward-headers-strategy: framework
   error:
     # Spring의 기본 오류 응답에 내부 메시지, 스택 트레이스, 검증 상세를 노출X
     # 이후 GlobalExceptionHandler에서 팀의 공통 ErrorResponse를 만들어 반환
@@ -106,5 +110,5 @@ app:
   cors:
     # 브라우저에서 백엔드 API 호출을 허용할 프론트엔드 주소 목록
     # 여러 주소는 쉼표로 구분하고, 마지막에 /를 붙이지 않음
-    # 담당자(문채이)가 SecurityConfig의 CORS 설정에 연결해야 실제로 적용됨
+    # SecurityConfig의 CORS 허용 Origin 설정으로 사용
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}

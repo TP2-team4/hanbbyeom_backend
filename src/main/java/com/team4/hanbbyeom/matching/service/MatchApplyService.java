@@ -118,11 +118,11 @@ public class MatchApplyService {
         //    activityMatchId를 match_participant에서 역으로 찾는다 — matchRequestId와
         //    activityMatchId는 서로 다른 시퀀스라 그대로 넘겨 쓰면 안 됨.
         Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 3) 위에서 찾은 activityMatchId로 실제 ActivityMatch 엔티티를 가져온다.
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 4) 이 매칭에 연결된 참가자 2명(호스트 slot A, 신청자 slot B)을 모두 가져온 뒤,
         //    - 신청자(slot B) 중 요청자 본인과 일치하는 행을 찾는다. 없으면 "내 신청이 아닌 매칭을
@@ -148,6 +148,12 @@ public class MatchApplyService {
         // 6) activity_match를 REJECTED로 전이시킨다 — 별도의 CANCELLED 처리를 새로 만들지 않고
         //    호스트 거절과 같은 reject()를 재사용한다("제안이 무산됨"이라는 결과는 동일하므로).
         activityMatch.reject(applicantUserId); // REJECTED 재사용 — 신청자 취소도 "제안이 무산됨"이라는 점은 동일
+
+        // 6-1) 매칭이 무산됐으므로 두 참여 연결 모두 해제 — 안 하면 released_at이 계속 null로
+        //      남아서 uq_participant_active_user 부분 유니크 인덱스에 걸려 이 두 사람이 다시는
+        //      매칭에 참여할 수 없게 된다.
+        host.release();
+        applicant.release();
 
         // 7) 호스트 게시글은 다시 모집 중(SEARCHING)으로 되돌려서 다른 사람이 신청할 수 있게 한다.
         MatchRequest hostRequest = matchRequestRepository.findById(host.getMatchRequestId())
