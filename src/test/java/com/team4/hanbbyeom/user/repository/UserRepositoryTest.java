@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.user.repository;
 
+import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import com.team4.hanbbyeom.user.domain.User;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class UserRepositoryTest {
                 email,
                 "encoded-password", // 테스트 목적이 "비밀번호 암호화 검증"이 아니라 Repository 저장/조회 검증
                 "테스트사용자",
+                DefaultTalkLevel.SILENT,
                 Instant.now()
         );
 
@@ -50,6 +52,7 @@ class UserRepositoryTest {
         // true 참인지, equals 두 값이 동일한지, notnull 값이 있는지
         assertTrue(foundUser.isPresent()); // 활성 사용자가 정상적으로 조회되었는지 확인
         assertEquals(email, foundUser.get().getEmail()); // 조회된 이메일이 저장한 이메일과 동일한지 확인
+        assertEquals(DefaultTalkLevel.SILENT, foundUser.get().getDefaultTalkLevel());
         assertTrue(userRepository.existsByEmailAndDeletedAtIsNull(email)); // 활성 사용자 존재 여부 조회가 true인지 확인
         assertNotNull(foundUser.get().getCreatedAt()); // 생성 시각이 자동 기록되었는지 확인
         assertNotNull(foundUser.get().getUpdatedAt()); // 수정 시각이 자동 기록되었는지 확인
@@ -62,6 +65,7 @@ class UserRepositoryTest {
                 "Repository-" + UUID.randomUUID() + "@example.com",
                 "encoded-password",
                 "테스트사용자",
+                DefaultTalkLevel.SILENT,
                 Instant.now()
         );
 
@@ -83,6 +87,7 @@ class UserRepositoryTest {
                 " repository-" + UUID.randomUUID() + "@example.com ",
                 "encoded-password",
                 "테스트사용자",
+                DefaultTalkLevel.SILENT,
                 Instant.now()
         );
 

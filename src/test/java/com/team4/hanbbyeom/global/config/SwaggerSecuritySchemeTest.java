@@ -45,6 +45,9 @@ class SwaggerSecuritySchemeTest {
                 .andExpect(status().isOk())
                 // 내 정보 조회는 토큰이 필요한 API이므로 문서에도 인증 요구가 있어야 함
                 .andExpect(jsonPath("$.paths['/api/users/me'].get.security[0].bearerAuth").isArray())
+                // 기본 설정 변경도 본인만 호출할 수 있는 보호 API로 표시되어야 함
+                .andExpect(jsonPath(
+                        "$.paths['/api/users/me/preferences'].patch.security[0].bearerAuth").isArray())
                 // 보호 Controller 5개가 모두 문서상 인증 대상으로 표시되는지 확인
                 .andExpect(jsonPath(
                         "$.paths['/api/run/conditions/{id}'].get.security[0].bearerAuth").isArray())
@@ -65,7 +68,7 @@ class SwaggerSecuritySchemeTest {
                 // 로그인·회원가입은 토큰 없이 호출하는 API이므로 인증 요구가 없어야 함
                 // → 있으면 Swagger UI가 Authorize 전에는 호출할 수 없는 것처럼 오해를 줌
 
-                // 각 경로마다 "문서에 존재함"을 먼저 확인하는 이유
+                // 각 경로마다 문서에 존재하는지 먼저 확인하는 이유
                 // → doesNotExist()는 경로 자체가 문서에 없을 때도 통과함
                 //   경로가 바뀌거나 사라지면 검증이 조용히 무의미해지므로, 존재 확인을 함께 둠
                 .andExpect(jsonPath("$.paths['/api/auth/login'].post").exists())
@@ -88,8 +91,8 @@ class SwaggerSecuritySchemeTest {
     }
 
     @Test
-    @DisplayName("인증 DTO의 설명과 선택 가능한 값이 문서에 포함됨")
-    void 인증_DTO_문서화() throws Exception {
+    @DisplayName("인증·사용자 DTO의 설명과 선택 가능한 값이 문서에 포함됨")
+    void 인증_및_사용자_DTO_문서화() throws Exception {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 // 설명 문구는 앞으로 다듬을 수 있으므로 내용까지 고정하지 않고 존재 여부만 확인
@@ -111,6 +114,31 @@ class SwaggerSecuritySchemeTest {
                         "$.components.schemas.SignUpRequest.properties.password.format").value("password"))
                 .andExpect(jsonPath(
                         "$.components.schemas.LoginRequest.properties.password.format").value("password"))
+
+                // 프론트엔드가 회원가입 요청에 보낼 필드의 의미와 허용값을 문서만 보고 알 수 있는지 확인
+                // enum 값을 정확히 검증해 서버와 다른 문자열을 선택지로 사용하는 것을 방지
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpRequest.properties.defaultTalkLevel.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpRequest.properties.defaultTalkLevel.enum")
+                        .value(containsInAnyOrder("SILENT", "LIGHT_CHAT")))
+
+                // 회원가입과 내 정보 조회 응답에도 저장된 기본 대화 수준의 설명이 표시되는지 확인
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpResponse.properties.defaultTalkLevel.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.UserResponse.properties.defaultTalkLevel.description").exists())
+                // 설정 변경 요청과 응답에도 필드 설명과 허용 가능한 enum 값이 표시되는지 확인
+                .andExpect(jsonPath(
+                        "$.components.schemas.UserPreferencesUpdateRequest.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.UserPreferencesUpdateRequest.properties.defaultTalkLevel.enum")
+                        .value(containsInAnyOrder("SILENT", "LIGHT_CHAT")))
+                .andExpect(jsonPath(
+                        "$.components.schemas.UserPreferencesResponse.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.UserPreferencesResponse.properties.defaultTalkLevel.description")
+                        .exists())
                 .andExpect(jsonPath(
                         "$.components.schemas.LoginResponse.properties.accessToken.description").exists())
                 // purpose는 문서를 보지 않으면 알 수 없는 값이라, 선택지가 실제로 노출되는지 확인

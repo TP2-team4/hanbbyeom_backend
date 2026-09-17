@@ -8,6 +8,7 @@ import com.team4.hanbbyeom.auth.dto.SignUpRequest;
 import com.team4.hanbbyeom.auth.dto.SignUpResponse;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
 import io.jsonwebtoken.Claims;
@@ -53,6 +54,9 @@ class AuthServiceTest {
     private static final String PASSWORD = "test1234";
     private static final String NICKNAME = "테스트";
 
+    // 기본 대화 수준이 관심사가 아닌 회원가입 테스트에서 사용할 정상 요청값
+    private static final DefaultTalkLevel DEFAULT_TALK_LEVEL = DefaultTalkLevel.SILENT;
+
     // 이메일 인증번호의 Hash: 형식만 맞는 가짜 Hash 값 (문자열 32번 반복해서 생성)
     private static final String DUMMY_CODE_HASH = "00".repeat(32);
 
@@ -85,13 +89,15 @@ class AuthServiceTest {
                 new SignUpRequest(
                         email,
                         PASSWORD,
-                        NICKNAME
+                        NICKNAME,
+                        DEFAULT_TALK_LEVEL
                 )
         );
     }
 
     // 기능	    확인하는 내용
     // 회원가입	비밀번호가 해시로 저장되는가
+    // 회원가입	선택한 기본 대화 수준이 응답과 DB에 동일하게 반영되는가
     // 회원가입	중복 이메일을 거부하는가
     // 회원가입	이메일 인증을 안 하면 거부하는가
     // 로그인	정상 로그인 시 Access Token이 발급되는가
@@ -130,7 +136,8 @@ class AuthServiceTest {
                         new SignUpRequest(
                                 email,
                                 PASSWORD,
-                                NICKNAME
+                                NICKNAME,
+                                DEFAULT_TALK_LEVEL
                         )
                 )
         );
@@ -146,9 +153,45 @@ class AuthServiceTest {
                         new SignUpRequest(
                                 randomEmail(),
                                 PASSWORD,
-                                NICKNAME
+                                NICKNAME,
+                                DEFAULT_TALK_LEVEL
                         )
                 )
+        );
+    }
+
+    @Test
+    @DisplayName("회원가입 시 선택한 기본 대화 수준 저장 및 응답")
+    void signUp_기본_대화_수준_저장() {
+        // 준비: 회원가입 가능한 인증 완료 이메일 생성
+        String email = randomEmail();
+        이메일_인증_완료(email);
+
+        // 실행: 기본값인 SILENT가 아닌 LIGHT_CHAT을 명시해서 회원가입
+        SignUpResponse response = authService.signUp(
+                new SignUpRequest(
+                        email,
+                        PASSWORD,
+                        NICKNAME,
+                        DefaultTalkLevel.LIGHT_CHAT
+                )
+        );
+
+        // 검증: 응답 DTO만 맞는 것이 아니라 User Entity에도 선택값이 저장됐는지 확인
+        User savedUser = userRepository
+                .findByEmailAndDeletedAtIsNull(email)
+                .orElseThrow();
+
+        // 회원가입 응답에 실제 저장 대상과 같은 값이 반환되는지 검증
+        assertEquals(
+                DefaultTalkLevel.LIGHT_CHAT,
+                response.defaultTalkLevel()
+        );
+
+        // DB에서 다시 조회한 사용자 설정이 요청값과 동일한지 검증
+        assertEquals(
+                DefaultTalkLevel.LIGHT_CHAT,
+                savedUser.getDefaultTalkLevel()
         );
     }
 

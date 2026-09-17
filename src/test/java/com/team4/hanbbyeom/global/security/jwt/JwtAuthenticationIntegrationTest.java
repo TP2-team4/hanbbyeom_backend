@@ -185,7 +185,8 @@ class JwtAuthenticationIntegrationTest {
                 // 토큰 소유자 본인의 정보가 내려오는지 확인
                 .andExpect(jsonPath("$.id").value(userId))
                 .andExpect(jsonPath("$.email").value(email))
-                .andExpect(jsonPath("$.nickname").value(NICKNAME));
+                .andExpect(jsonPath("$.nickname").value(NICKNAME))
+                .andExpect(jsonPath("$.defaultTalkLevel").value("SILENT"));
     }
 
     @Test
@@ -290,7 +291,8 @@ class JwtAuthenticationIntegrationTest {
                     email = NULL,
                     password_hash = NULL,
                     nickname = NULL,
-                    email_verified_at = NULL
+                    email_verified_at = NULL,
+                    default_talk_level = NULL
                 WHERE id = ?
                 """,
                 OffsetDateTime.now(),
