@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.global.exception;
 
 import com.team4.hanbbyeom.matching.exception.*;
+import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -120,6 +121,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 10-1. 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
+    // 원래 RunExceptionHandler(별도 @RestControllerAdvice)에 있었으나, 서로 다른
+    // @RestControllerAdvice로 나뉘면 Spring이 "먼저 평가되는 Advice 빈"에서 매칭되는
+    // 핸들러를 찾는 순간 멈춰버려서, 이 Advice보다 GlobalExceptionHandler(catch-all 포함)가
+    // 먼저 평가될 경우 이 핸들러까지 도달하지 못하고 11번 catch-all(500)로 빠지는 문제가 있었음
+    // → 모든 구체적인 핸들러를 이 클래스 하나에 모아서 그런 순서 의존성을 없앤다
+    @ExceptionHandler(RunMatchConditionNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
     // 11. 예상하지 못한 예외를 처리하는 최종 핸들러

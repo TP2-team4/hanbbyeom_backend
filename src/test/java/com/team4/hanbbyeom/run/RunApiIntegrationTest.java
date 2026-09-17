@@ -1,43 +1,51 @@
 package com.team4.hanbbyeom.run;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
-import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
-import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
-import com.team4.hanbbyeom.run.dto.RunConditionResponse;
 import com.team4.hanbbyeom.run.dto.RunConditionUpdateRequest;
-import com.team4.hanbbyeom.run.dto.RunCourseResponse;
-import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
-import com.team4.hanbbyeom.run.service.RunConditionService;
-import com.team4.hanbbyeom.run.service.RunCourseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 // #18: Run API 통합 테스트 및 C파트 연동 확인
 // 개별 API 단위가 아니라, 사용자 시나리오처럼 이어지는 흐름과
 // Matching 도메인(C파트)이 run_match_condition 데이터를 정상 참조하는지를 검증한다.
+// MockMvc + JwtTokenProvider로 실제 HTTP 요청을 흉내 내어 Controller 매핑, JWT 인증,
+// JSON (역)직렬화, Bean Validation, HTTP 상태 코드까지 전부 검증한다
+// (Service를 직접 호출하면 Security Filter Chain을 거치지 않아 이 부분이 검증되지 않음).
 @SpringBootTest
+@AutoConfigureMockMvc
 @Transactional
 public class RunApiIntegrationTest {
 
     @Autowired
-    private RunCourseService runCourseService;
+    private MockMvc mockMvc;
+    // Spring Bean으로 주입받지 않는 이유: 요청 바디를 문자열로 직렬화(record → JSON)하는
+    // 용도로만 쓰고 역직렬화는 하지 않아서, 별도 설정 없는 기본 ObjectMapper로도 충분함
+    private final ObjectMapper objectMapper = new ObjectMapper();
     @Autowired
-    private RunConditionService runConditionService;
-    @Autowired
-    private MatchRequestBoardService matchRequestBoardService;
+    private JwtTokenProvider jwtTokenProvider;
     @Autowired
     private MatchRequestRepository matchRequestRepository;
     @Autowired
@@ -71,83 +79,140 @@ public class RunApiIntegrationTest {
         );
     }
 
-    // 1. 전체 플로우: 코스 조회 -> 조건 등록 -> 조회 -> 수정 -> 삭제
-    @Test
-    void 전체_플로우가_이어서_정상_동작한다() {
-        // 코스 조회
-        List<RunCourseResponse> courses = runCourseService.getCourses();
-        RunCourseResponse selectedCourse = courses.stream()
-                .filter(c -> c.name().equals("뚝섬 한강공원"))
-                .findFirst()
-                .orElseThrow();
-
-        // 조건 등록
-        RunConditionCreateRequest createRequest = new RunConditionCreateRequest(
-                matchRequestId, selectedCourse.id(), "뚝섬유원지 3번 출구", 5000, 8000, 360, 400
-        );
-        Long createdId = runConditionService.create(ownerUserId, createRequest);
-        assertThat(createdId).isEqualTo(matchRequestId);
-
-        // 조회
-        RunConditionResponse created = runConditionService.getById(ownerUserId, createdId);
-        assertThat(created.courseName()).isEqualTo("뚝섬 한강공원");
-        assertThat(created.meetingPoint()).isEqualTo("뚝섬유원지 3번 출구");
-
-        // 수정
-        RunConditionUpdateRequest updateRequest = new RunConditionUpdateRequest(
-                selectedCourse.id(), "여의도 2번 출구", 3000, 6000, 310, 380
-        );
-        runConditionService.update(ownerUserId, createdId, updateRequest);
-
-        RunConditionResponse updated = runConditionService.getById(ownerUserId, createdId);
-        assertThat(updated.meetingPoint()).isEqualTo("여의도 2번 출구");
-        assertThat(updated.distanceMinMeters()).isEqualTo(3000);
-        assertThat(updated.distanceMaxMeters()).isEqualTo(6000);
-
-        // 삭제
-        runConditionService.delete(ownerUserId, createdId);
-        assertThatThrownBy(() -> runConditionService.getById(ownerUserId, createdId))
-                .isInstanceOf(RunMatchConditionNotFoundException.class);
+    // 매 요청마다 반복되는 "Bearer <토큰>" 헤더 값 생성
+    private String bearerToken(Long userId) {
+        return "Bearer " + jwtTokenProvider.createAccessToken(userId);
     }
 
-    // 2. C파트 연동 확인: 모집 게시판 목록 조회(searchBoard)에서 run_match_condition 데이터가 정상 조회되는지
+    // 1. 전체 플로우: 코스 조회 -> 조건 등록 -> 조회 -> 수정 -> 삭제 (전부 실제 HTTP 요청)
     @Test
-    void 모집게시판_목록에_러닝조건_데이터가_정상_연동된다() {
+    void 전체_플로우가_이어서_정상_동작한다() throws Exception {
+        // 코스 조회 (인증 불필요, permitAll) — 응답 JSON에 시딩된 코스가 들어있는지 확인
+        mockMvc.perform(get("/api/run/courses"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.name == '뚝섬 한강공원')]").exists());
+
+        // 조건 등록 — 201 Created + Location 헤더 확인
         RunConditionCreateRequest createRequest = new RunConditionCreateRequest(
                 matchRequestId, courseId, "뚝섬유원지 3번 출구", 5000, 8000, 360, 400
         );
-        runConditionService.create(ownerUserId, createRequest);
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createRequest)))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, "/api/run/conditions/" + matchRequestId));
 
-        // currentUserId를 소유자가 아닌 다른 유저로 조회해야 목록에 포함됨(본인 글은 항상 제외)
-        List<MatchBoardItemResponse> board = matchRequestBoardService.getBoard(
-                null, null, null, null, null, null, null, otherUserId
+        // 조회 — 등록한 값이 그대로 내려오는지 확인
+        mockMvc.perform(get("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.courseName").value("뚝섬 한강공원"))
+                .andExpect(jsonPath("$.meetingPoint").value("뚝섬유원지 3번 출구"));
+
+        // 수정 — 204 No Content
+        RunConditionUpdateRequest updateRequest = new RunConditionUpdateRequest(
+                courseId, "여의도 2번 출구", 3000, 6000, 310, 380
         );
+        mockMvc.perform(patch("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isNoContent());
 
-        MatchBoardItemResponse item = board.stream()
-                .filter(row -> row.id().equals(matchRequestId))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("모집 게시판 목록에서 등록한 조건을 찾지 못했습니다."));
+        // 재조회 — 수정된 값이 실제로 반영됐는지 확인
+        mockMvc.perform(get("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.meetingPoint").value("여의도 2번 출구"))
+                .andExpect(jsonPath("$.distanceMinMeters").value(3000))
+                .andExpect(jsonPath("$.distanceMaxMeters").value(6000));
 
-        assertThat(item.courseName()).isEqualTo("뚝섬 한강공원");
-        assertThat(item.distanceMinMeters()).isEqualTo(5000);
-        assertThat(item.distanceMaxMeters()).isEqualTo(8000);
-        assertThat(item.paceMinSec()).isEqualTo(360);
-        assertThat(item.paceMaxSec()).isEqualTo(400);
+        // 삭제 — 204 No Content
+        mockMvc.perform(delete("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isNoContent());
+
+        // 삭제 후 재조회 — RunExceptionHandler가 404로 매핑하는지 확인
+        mockMvc.perform(get("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isNotFound());
+    }
+
+    // 2. C파트 연동 확인: 모집 탭 목록 조회 API(GET /api/matching/board)에서
+    // run_match_condition 데이터가 정상 조회되는지 (Matching 도메인 Controller까지 실제로 거침)
+    @Test
+    void 모집게시판_목록에_러닝조건_데이터가_정상_연동된다() throws Exception {
+        RunConditionCreateRequest createRequest = new RunConditionCreateRequest(
+                matchRequestId, courseId, "뚝섬유원지 3번 출구", 5000, 8000, 360, 400
+        );
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createRequest)))
+                .andExpect(status().isCreated());
+
+        // 소유자 본인 글은 목록에서 항상 제외되므로, 다른 유저(otherUserId)의 토큰으로 조회해야
+        // 목록에 포함된다
+        mockMvc.perform(get("/api/matching/board")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(otherUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == %d)]", matchRequestId).exists())
+                .andExpect(jsonPath("$[?(@.id == %d)].courseName".formatted(matchRequestId)).value("뚝섬 한강공원"))
+                .andExpect(jsonPath("$[?(@.id == %d)].distanceMinMeters".formatted(matchRequestId)).value(5000))
+                .andExpect(jsonPath("$[?(@.id == %d)].distanceMaxMeters".formatted(matchRequestId)).value(8000))
+                .andExpect(jsonPath("$[?(@.id == %d)].paceMinSec".formatted(matchRequestId)).value(360))
+                .andExpect(jsonPath("$[?(@.id == %d)].paceMaxSec".formatted(matchRequestId)).value(400));
     }
 
     // 3. 경계값 테스트: 거리/페이스가 허용 범위의 정확한 경계값이면 정상 등록되어야 함
     @Test
-    void 거리와_페이스가_정확히_경계값이면_정상_등록된다() {
+    void 거리와_페이스가_정확히_경계값이면_정상_등록된다() throws Exception {
         RunConditionCreateRequest boundaryRequest = new RunConditionCreateRequest(
                 matchRequestId, courseId, "출구", 1000, 20000, 300, 450
         );
 
-        Long createdId = runConditionService.create(ownerUserId, boundaryRequest);
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(boundaryRequest)))
+                .andExpect(status().isCreated());
 
-        RunConditionResponse response = runConditionService.getById(ownerUserId, createdId);
-        assertThat(response.distanceMinMeters()).isEqualTo(1000);
-        assertThat(response.distanceMaxMeters()).isEqualTo(20000);
-        assertThat(response.paceMinSec()).isEqualTo(300);
-        assertThat(response.paceMaxSec()).isEqualTo(450);
+        mockMvc.perform(get("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.distanceMinMeters").value(1000))
+                .andExpect(jsonPath("$.distanceMaxMeters").value(20000))
+                .andExpect(jsonPath("$.paceMinSec").value(300))
+                .andExpect(jsonPath("$.paceMaxSec").value(450));
+    }
+
+    // 4. Bean Validation 검증: 필수값(meetingPoint)이 비어 있으면 Controller까지 도달하지 못하고
+    // 400 Bad Request로 막혀야 한다 (Service 직접 호출 테스트로는 검증 불가능했던 부분)
+    @Test
+    void 필수값이_비어있으면_400을_반환한다() throws Exception {
+        RunConditionCreateRequest invalidRequest = new RunConditionCreateRequest(
+                matchRequestId, courseId, "", 5000, 8000, 360, 400 // meetingPoint가 빈 문자열(@NotBlank 위반)
+        );
+
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    // 5. 인증 없이 호출하면 401을 반환한다 (JWT 인증 필터 동작 확인)
+    @Test
+    void 토큰_없이_조건_등록하면_401을_반환한다() throws Exception {
+        RunConditionCreateRequest createRequest = new RunConditionCreateRequest(
+                matchRequestId, courseId, "뚝섬유원지 3번 출구", 5000, 8000, 360, 400
+        );
+
+        mockMvc.perform(post("/api/run/conditions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createRequest)))
+                .andExpect(status().isUnauthorized());
     }
 }
