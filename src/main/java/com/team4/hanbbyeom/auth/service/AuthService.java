@@ -33,7 +33,7 @@ public class AuthService {
 
     // 회원가입: 이메일 중복 확인, 이메일 인증 완료 확인, 비밀번호 암호화 후 사용자 저장
     @Transactional
-    // SignUpRequest: 이메일, 비밀번호, 닉네임을 하나로 묶어놓은 객체
+    // SignUpRequest: 이메일, 비밀번호, 닉네임, 기본 대화 수준을 하나로 묶어놓은 객체
     public SignUpResponse signUp(SignUpRequest request) {
         String email = EmailNormalizer.normalize(request.email()); // 이메일 정규화(공백 제거 후 소문자로)
 
@@ -52,6 +52,7 @@ public class AuthService {
                 email,
                 passwordHash,
                 request.nickname(),
+                request.defaultTalkLevel(),
                 emailVerifiedAt // 실제 인증 성공 시각을 그대로 기록
         );
 
