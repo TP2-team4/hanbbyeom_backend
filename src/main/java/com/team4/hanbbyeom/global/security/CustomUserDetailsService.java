@@ -42,4 +42,14 @@ public class CustomUserDetailsService implements UserDetailsService {
         // User Entity에는 그런 메서드가 없어 그대로는 넘길 수 없음
         return new CustomUserDetails(user);
     }
+
+    // JWT 요청 인증 시 JwtAuthenticationFilter가 호출하는 메서드
+    // 검증된 토큰의 subject에서 추출한 사용자 ID로 탈퇴하지 않은 사용자를 조회
+    public CustomUserDetails loadUserById(Long userId) {
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
+
+        // 이후 필터가 이 객체를 Authentication의 principal(현재 인증된 사용자가 누구인지)로 사용
+        return new CustomUserDetails(user);
+    }
 }
