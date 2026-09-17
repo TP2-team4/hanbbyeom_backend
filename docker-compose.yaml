@@ -31,8 +31,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${APP_PORT:-8080}:8080"
+    # 이제 외부 진입점은 caddy(443/80)만 사용. app은 compose 내부 네트워크에서만
+    # "app:8080"으로 접근되면 충분해서 호스트에 직접 포트를 열지 않음(공격 표면 축소).
+    expose:
+      - "8080"
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
       DB_USERNAME: ${POSTGRES_USER}
@@ -47,5 +49,21 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED}
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    mem_limit: 100m
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
