@@ -11,7 +11,9 @@ import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.matching.service.MatchApplyService;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.util.List;
 
+@Tag(name = "Matching - Board", description = "모집 탭 목록 조회 및 신청/신청취소 API")
 // Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
 @SecurityRequirement(name = "bearerAuth")
 @RestController
@@ -40,6 +43,10 @@ public class MatchRequestBoardController {
     // 모집 탭 목록 조회 — 쿼리 파라미터는 전부 선택값(생략 가능): course/talkLevel은 정확히
     // 일치하는 값만, minDistance~maxPace는 "게시글의 범위와 겹치는지"로 필터링, datePreset은
     // TODAY/TOMORROW/WEEKEND 중 하나. 인증된 사용자 id로 본인이 올린 글은 결과에서 항상 제외된다.
+    @Operation(summary = "모집 탭 목록 조회",
+            description = "course/talkLevel은 정확히 일치하는 값만, minDistance~maxPace는 게시글의 범위와 겹치는 것만, " +
+                    "datePreset(TODAY/TOMORROW/WEEKEND)은 해당 기간에 속하는 것만 필터링합니다. " +
+                    "모든 파라미터는 선택값이며, 조회자 본인 글은 항상 제외됩니다.")
     @GetMapping
     public List<MatchBoardItemResponse> getBoard(
             @RequestParam(required = false) String course,
@@ -57,6 +64,8 @@ public class MatchRequestBoardController {
 
     // requestId(호스트 게시글)의 작성자 신뢰도 프로필 조회 — 신청하기 전 "이 사람 어떤 사람이지"
     // 미리보기 용도라, 응답 자체엔 인가 제한이 없다(로그인한 사용자면 누구나 조회 가능).
+    @Operation(summary = "호스트 신뢰도 프로필 조회",
+            description = "신청 전 미리보기 용도입니다. 로그인한 사용자면 누구나 조회할 수 있습니다.")
     @GetMapping("/{requestId}/host-profile")
     public TrustProfileResponse getHostProfile(@PathVariable Long requestId) {
         // 로그인한 사용자면 누구나 조회 가능 (신청 전 미리보기 용도)
@@ -69,6 +78,9 @@ public class MatchRequestBoardController {
     // requestId(호스트 게시글)에 신청 — 요청 바디(MatchApplyRequest)는 필드가 없는 빈 값이라
     // 신청 시점에 따로 입력받는 데이터는 없다. 성공하면 Location 헤더에 새로 생성된
     // activityMatchId 경로가 담긴다(201 Created).
+    @Operation(summary = "모집글 신청",
+            description = "요청 바디는 필요 없습니다(신청자는 본인 게시글 없이도 신청할 수 있습니다). " +
+                    "성공 시 생성된 activity_match id로의 경로가 Location 헤더에 담깁니다.")
     @PostMapping("/{requestId}/apply")
     public ResponseEntity<Void> apply(
             @PathVariable Long requestId,
@@ -81,6 +93,9 @@ public class MatchRequestBoardController {
 
     // 신청 취소 — 경로의 requestId는 activityMatchId가 아니라 호스트 게시글 id다(프론트는
     // 이것만 알면 됨). 요청/응답 바디 없음.
+    @Operation(summary = "신청 취소",
+            description = "경로의 requestId는 activityMatchId가 아니라 호스트 게시글 id입니다. " +
+                    "아직 호스트가 응답하지 않은(PROPOSED) 신청만 취소할 수 있습니다.")
     @PostMapping("/{requestId}/apply/cancel")
     public ResponseEntity<Void> cancelApplication(
             @PathVariable Long requestId,
