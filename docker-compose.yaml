@@ -19,7 +19,10 @@ services:
       retries: 10
 
   app:
-    image: shppark/hanbbyeom-backend:latest
+    # 평소엔 APP_IMAGE_TAG를 비워두면 latest로 동작(지금과 동일).
+    # 롤백 필요 시 EC2의 .env에 APP_IMAGE_TAG=<커밋 해시>만 추가하고
+    # docker compose up -d 하면 됨 — 이 추적 파일은 건드리지 않음.
+    image: shppark/hanbbyeom-backend:${APP_IMAGE_TAG:-latest}
     restart: unless-stopped
     # 이 제한이 있어야 Dockerfile의 -XX:MaxRAMPercentage=75.0이 "이 컨테이너에 할당된
     # 500m의 75%(~375MB)"를 힙으로 쓰겠다는 뜻이 됨. db(300m) + app(500m) = 800m로
