@@ -1,10 +1,13 @@
 package com.team4.hanbbyeom.matching.controller;
 
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
+import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
+import com.team4.hanbbyeom.matching.dto.ActivityMatchStatusResponse;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
@@ -24,15 +27,51 @@ import java.util.List;
 @RequestMapping("/api/matching/matches")
 public class ActivityMatchController {
 
+    private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final TrustProfileLookupService trustProfileLookupService;
     private final MatchDecisionService matchDecisionService;
 
-    public ActivityMatchController(MatchParticipantRepository matchParticipantRepository,
-                                   TrustProfileLookupService trustProfileLookupService, MatchDecisionService matchDecisionService) {
+    public ActivityMatchController(ActivityMatchRepository activityMatchRepository,
+                                   MatchParticipantRepository matchParticipantRepository,
+                                   TrustProfileLookupService trustProfileLookupService,
+                                   MatchDecisionService matchDecisionService) {
+        this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.trustProfileLookupService = trustProfileLookupService;
         this.matchDecisionService = matchDecisionService;
+    }
+
+    // 신청자·호스트 둘 다 조회 가능한 매칭 건 상태 조회 — 특히 신청자가 "내 신청이 거절됐는지
+    // (REJECTED) 응답 시간이 지나 만료됐는지(EXPIRED) 확정됐는지(CONFIRMED)"를 구분해서 알
+    // 방법이 없었는데(호스트 게시글 상태만 보면 둘 다 그냥 SEARCHING으로 보임), 이 API로
+    // activityMatchId 기준 정확한 상태를 직접 조회할 수 있게 한다.
+    @Operation(summary = "매칭 건 상태 조회",
+            description = "이 매칭의 호스트 또는 신청자 본인만 조회할 수 있습니다. 신청자가 폴링해서 " +
+                    "PROPOSED(대기중)/CONFIRMED(확정)/REJECTED(거절됨)/EXPIRED(응답시간 초과) 중 " +
+                    "무엇인지 구분하는 용도로 쓸 수 있습니다.")
+    @GetMapping("/{activityMatchId}")
+    public ActivityMatchStatusResponse getStatus(
+            @PathVariable Long activityMatchId,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
+                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+
+        List<MatchParticipant> participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
+        boolean isParticipant = participants.stream()
+                .anyMatch(p -> p.getUserId().equals(principal.getUserId()));
+        if (!isParticipant) {
+            throw new NotMatchParticipantException("본인이 관련된 매칭만 조회할 수 있어요.");
+        }
+
+        return new ActivityMatchStatusResponse(
+                activityMatch.getId(),
+                activityMatch.getStatus().name(),
+                activityMatch.getMeetingCode(),
+                activityMatch.getConfirmedAt(),
+                activityMatch.getClosedAt()
+        );
     }
 
     // activityMatchId에 신청한 사람(slot B)의 신뢰도 프로필 조회 — 이 매칭의 호스트(slot A)

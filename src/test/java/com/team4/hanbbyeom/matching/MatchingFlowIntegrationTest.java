@@ -158,6 +158,14 @@ class MatchingFlowIntegrationTest {
         // → 호스트 게시글이 최종적으로 MATCHED로 확정됐는지 확인
         assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
                 .isEqualTo(MatchRequestStatus.MATCHED);
+
+        // → 신청자(B) 본인도 이 매칭 건 상태를 조회해서 CONFIRMED임을 확인할 수 있어야 한다
+        // (팀원 피드백: 신청자가 "내 신청이 어떻게 됐는지" 알 방법이 필요하다는 지적 반영)
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.meetingCode").isString());
     }
 
     @Test
@@ -198,6 +206,13 @@ class MatchingFlowIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+
+        // → 신청자(B) 본인이 이 매칭 건을 조회하면 REJECTED임을 구분해서 알 수 있어야 한다
+        // (게시글 상태만 보면 거절인지 자동만료인지 구분 불가 — 팀원 피드백 반영)
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
     }
 
     @Test
@@ -247,5 +262,11 @@ class MatchingFlowIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+
+        // → 신청자(B) 본인이 조회하면 REJECTED가 아니라 EXPIRED로 구분돼서 보여야 한다
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EXPIRED"));
     }
 }
