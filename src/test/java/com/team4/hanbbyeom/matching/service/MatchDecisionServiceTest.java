@@ -7,6 +7,8 @@ import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,7 @@ class MatchDecisionServiceTest {
     @Autowired private MatchParticipantRepository matchParticipantRepository;
     @Autowired private ActivityMatchRepository activityMatchRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @PersistenceContext private EntityManager entityManager;
 
     private Long hostUserId, applicantUserId, hostRequestId, activityMatchId;
 
@@ -116,6 +119,44 @@ class MatchDecisionServiceTest {
     }
 
     @Test
+    void 응답_기한이_지나면_수락할_수_없다() throws InterruptedException {
+        // 상태는 여전히 PROPOSED지만(스케줄러가 아직 안 돈 상황을 흉내냄) decisionExpiresAt만
+        // 이미 지난 상태를 만든다.
+        OffsetDateTime justPassed = OffsetDateTime.now();
+        jdbcTemplate.update(
+                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
+                justPassed, activityMatchId
+        );
+        // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
+        // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
+        // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
+        // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
+        entityManager.clear();
+        Thread.sleep(20);
+
+        assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
+
+    @Test
+    void 응답_기한이_지나면_거절할_수_없다() throws InterruptedException {
+        OffsetDateTime justPassed = OffsetDateTime.now();
+        jdbcTemplate.update(
+                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
+                justPassed, activityMatchId
+        );
+        // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
+        // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
+        // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
+        // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
+        entityManager.clear();
+        Thread.sleep(20);
+
+        assertThatThrownBy(() -> matchDecisionService.reject(hostUserId, activityMatchId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
+
+    @Test
     void 응답_기한이_지난_매칭은_자동으로_EXPIRED_처리된다() throws InterruptedException {
         // decisionExpiresAt을 "지금"으로 당겨두고 잠깐 대기해서, expireOverdue() 안의
         // now()가 이 값보다 뒤가 되도록 만든다(진짜 과거로 세팅하면 created_at보다도 앞서게
@@ -125,6 +166,11 @@ class MatchDecisionServiceTest {
                 "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
                 justPassed, activityMatchId
         );
+        // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
+        // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
+        // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
+        // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
+        entityManager.clear();
         Thread.sleep(20);
 
         matchDecisionService.expireOverdue();

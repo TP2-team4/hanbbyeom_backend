@@ -52,10 +52,10 @@ public class MatchDecisionService {
                 .findFirst()
                 .orElseThrow(() -> new NotMatchParticipantException("아직 신청자가 없어요."));
 
-        // 4) 이미 응답했거나(CONFIRMED/REJECTED) 자동 만료(EXPIRED)된 건은 다시 수락할 수 없음
-        if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
-            throw new MatchRequestNotSearchingException("이미 응답했거나 종료된 매칭이에요.");
-        }
+        // 4) 이미 응답했거나(CONFIRMED/REJECTED) 자동 만료(EXPIRED)된 건은 다시 수락할 수 없음.
+        //    상태가 아직 PROPOSED라도 decisionExpiresAt이 이미 지났으면(스케줄러가 아직 안 돈
+        //    사이) 수락을 막는다 — 안 그러면 기한 지난 매칭이 수락돼 CONFIRMED가 될 수 있음.
+        ensureRespondable(activityMatch);
 
         // 5) 호스트 참여 상태 ACCEPTED로, activity_match를 CONFIRMED로 전이하며 현장 확인 코드 발급
         host.accept();
@@ -86,9 +86,7 @@ public class MatchDecisionService {
                 .findFirst()
                 .orElseThrow(() -> new NotMatchParticipantException("아직 신청자가 없어요."));
 
-        if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
-            throw new MatchRequestNotSearchingException("이미 응답했거나 종료된 매칭이에요.");
-        }
+        ensureRespondable(activityMatch);
 
         host.reject();
         activityMatch.reject(hostUserId);
@@ -133,6 +131,18 @@ public class MatchDecisionService {
             applicant.release();
 
             transitionBothRequests(host, applicant, MatchRequestStatus.SEARCHING);
+        }
+    }
+
+    // accept()/reject() 공통 — 응답 가능한 상태인지 검증한다. status가 PROPOSED가 아니거나
+    // (이미 CONFIRMED/REJECTED/EXPIRED), 상태는 아직 PROPOSED라도 decisionExpiresAt이 이미
+    // 지났으면(1분 주기 스케줄러가 아직 못 돈 사이) 응답을 막는다. 리뷰 피드백 반영:
+    // 상태만 보고 시각을 안 보면 기한이 지난 매칭도 수락/거절될 수 있었음.
+    private void ensureRespondable(ActivityMatch activityMatch) {
+        boolean alreadyDecided = activityMatch.getStatus() != ActivityMatchStatus.PROPOSED;
+        boolean deadlinePassed = !OffsetDateTime.now().isBefore(activityMatch.getDecisionExpiresAt());
+        if (alreadyDecided || deadlinePassed) {
+            throw new MatchRequestNotSearchingException("이미 응답했거나 종료된 매칭이에요.");
         }
     }
 

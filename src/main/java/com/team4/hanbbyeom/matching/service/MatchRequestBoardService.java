@@ -7,7 +7,7 @@ import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
-import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
+import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -156,15 +156,16 @@ public class MatchRequestBoardService {
         }
 
         // 2) 활성 참여 행에서 activityMatchId 역조회 (MatchApplyService.cancelApplication()과 동일한 방식)
+        //    "신청이 없음"은 권한 문제가 아니라 리소스 부재이므로 404 전용 예외를 쓴다.
         Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
-                .orElseThrow(() -> new NotMatchParticipantException("대기 중인 신청이 없어요."));
+                .orElseThrow(() -> new PendingApplicationNotFoundException("대기 중인 신청이 없어요."));
 
         // 3) released_at이 아직 안 채워지는 이슈 때문에, 이미 끝난(CONFIRMED/REJECTED/EXPIRED)
         //    매칭도 위 조회에 걸릴 수 있어 상태까지 재확인한다 — PROPOSED일 때만 "대기 중"이다.
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("대기 중인 신청이 없어요."));
+                .orElseThrow(() -> new PendingApplicationNotFoundException("대기 중인 신청이 없어요."));
         if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
-            throw new NotMatchParticipantException("대기 중인 신청이 없어요.");
+            throw new PendingApplicationNotFoundException("대기 중인 신청이 없어요.");
         }
 
         return new PendingApplicationResponse(activityMatchId, activityMatch.getDecisionExpiresAt());

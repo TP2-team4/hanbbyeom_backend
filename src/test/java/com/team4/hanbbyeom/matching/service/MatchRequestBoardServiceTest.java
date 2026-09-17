@@ -5,7 +5,7 @@ import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
-import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
+import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -161,6 +161,6 @@ class MatchRequestBoardServiceTest {
     @Test
     void 대기중인_신청이_없으면_예외가_발생한다() {
         assertThatThrownBy(() -> matchRequestBoardService.getPendingApplication(testUserId, testMatchRequestId))
-                .isInstanceOf(NotMatchParticipantException.class);
+                .isInstanceOf(PendingApplicationNotFoundException.class);
     }
 }
