@@ -8,8 +8,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.OffsetDateTime;
-import java.util.concurrent.ThreadLocalRandom;
 
 // 호스트의 수락/거절, 그리고 시스템의 자동 만료 처리를 담당. MatchApplyService(신청자 액션)와
 // 책임을 나눠서, "누가 주체인 액션인지"로 서비스를 분리했다.
@@ -20,6 +20,9 @@ public class MatchDecisionService {
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final JdbcTemplate jdbcTemplate;
+    // 현장 확인 코드 생성용 — 향후 참석 인증 수단으로 쓰일 가능성을 고려해 예측 불가능한
+    // SecureRandom을 사용한다(ThreadLocalRandom은 암호학적으로 안전하지 않음).
+    private final SecureRandom secureRandom = new SecureRandom();
 
     public MatchDecisionService(MatchRequestRepository matchRequestRepository,
                                 ActivityMatchRepository activityMatchRepository,
@@ -165,7 +168,7 @@ public class MatchDecisionService {
 
     // 현장 확인용 6자리 코드 생성 ("000000"~"999999", 0으로 시작해도 유효)
     private String generateMeetingCode() {
-        int code = ThreadLocalRandom.current().nextInt(1_000_000);
+        int code = secureRandom.nextInt(1_000_000);
         return String.format("%06d", code);
     }
 }

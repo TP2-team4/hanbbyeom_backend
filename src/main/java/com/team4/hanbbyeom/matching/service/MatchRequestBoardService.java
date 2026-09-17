@@ -160,8 +160,9 @@ public class MatchRequestBoardService {
         Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
                 .orElseThrow(() -> new PendingApplicationNotFoundException("대기 중인 신청이 없어요."));
 
-        // 3) released_at이 아직 안 채워지는 이슈 때문에, 이미 끝난(CONFIRMED/REJECTED/EXPIRED)
-        //    매칭도 위 조회에 걸릴 수 있어 상태까지 재확인한다 — PROPOSED일 때만 "대기 중"이다.
+        // 3) CONFIRMED(확정)는 아직 활동이 안 끝난 "활성 상태"라 released_at을 의도적으로
+        //    안 채우므로(MatchDecisionService.accept() 참고), 위 조회에서 이미 확정된 매칭도
+        //    걸릴 수 있다. 그래서 상태까지 재확인한다 — PROPOSED일 때만 진짜 "대기 중"이다.
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new PendingApplicationNotFoundException("대기 중인 신청이 없어요."));
         if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {

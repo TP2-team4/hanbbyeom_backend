@@ -70,6 +70,17 @@ class MatchDecisionServiceTest {
         );
     }
 
+    // created_at 바로 다음 순간(1ms 뒤)을 응답 기한으로 세팅한다 — chk_activity_match_time
+    // 제약(created_at < decision_expires_at)은 통과하면서, DB에 이미 기록된 created_at을
+    // 기준으로 삼으므로 Thread.sleep 없이도 "이미 지난 기한"임이 결정적으로 보장된다
+    // (이 메서드 호출 이후로도 락 조회·엔티티 재조회 등 여러 DB 왕복을 더 거친 뒤에야
+    // 실제 검증이 일어나므로, 그 시점의 실제 시각은 항상 이 값보다 뒤다).
+    private OffsetDateTime pastDeadlineFor(Long activityMatchId) {
+        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
+                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
+        return createdAt.plusNanos(1_000_000);
+    }
+
     @Test
     void 호스트가_수락하면_CONFIRMED로_전이되고_meeting_code가_발급된다() {
         MatchConfirmResponse response = matchDecisionService.accept(hostUserId, activityMatchId);
@@ -119,59 +130,52 @@ class MatchDecisionServiceTest {
     }
 
     @Test
-    void 응답_기한이_지나면_수락할_수_없다() throws InterruptedException {
+    void 응답_기한이_지나면_수락할_수_없다() {
         // 상태는 여전히 PROPOSED지만(스케줄러가 아직 안 돈 상황을 흉내냄) decisionExpiresAt만
         // 이미 지난 상태를 만든다.
-        OffsetDateTime justPassed = OffsetDateTime.now();
         jdbcTemplate.update(
                 "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                justPassed, activityMatchId
+                pastDeadlineFor(activityMatchId), activityMatchId
         );
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
         // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
         entityManager.clear();
-        Thread.sleep(20);
 
         assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
                 .isInstanceOf(MatchRequestNotSearchingException.class);
     }
 
     @Test
-    void 응답_기한이_지나면_거절할_수_없다() throws InterruptedException {
-        OffsetDateTime justPassed = OffsetDateTime.now();
+    void 응답_기한이_지나면_거절할_수_없다() {
         jdbcTemplate.update(
                 "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                justPassed, activityMatchId
+                pastDeadlineFor(activityMatchId), activityMatchId
         );
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
         // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
         entityManager.clear();
-        Thread.sleep(20);
 
         assertThatThrownBy(() -> matchDecisionService.reject(hostUserId, activityMatchId))
                 .isInstanceOf(MatchRequestNotSearchingException.class);
     }
 
     @Test
-    void 응답_기한이_지난_매칭은_자동으로_EXPIRED_처리된다() throws InterruptedException {
-        // decisionExpiresAt을 "지금"으로 당겨두고 잠깐 대기해서, expireOverdue() 안의
-        // now()가 이 값보다 뒤가 되도록 만든다(진짜 과거로 세팅하면 created_at보다도 앞서게
-        // 돼서 chk_activity_match_time 제약에 걸림).
-        OffsetDateTime justPassed = OffsetDateTime.now();
+    void 응답_기한이_지난_매칭은_자동으로_EXPIRED_처리된다() {
+        // created_at 바로 다음 순간으로 응답 기한을 당겨서 "이미 지난 기한"을 만든다
+        // (진짜 과거로 세팅하면 created_at보다도 앞서게 돼서 chk_activity_match_time 제약에 걸림).
         jdbcTemplate.update(
                 "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                justPassed, activityMatchId
+                pastDeadlineFor(activityMatchId), activityMatchId
         );
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
         // accept()/reject()가 항상 별개 트랜잭션이라 이 문제가 없음 — 테스트에서만 필요).
         entityManager.clear();
-        Thread.sleep(20);
 
         matchDecisionService.expireOverdue();
 
