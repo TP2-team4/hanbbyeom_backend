@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ class MatchApplyServiceTest {
 
     @Autowired private MatchApplyService matchApplyService;
     @Autowired private MatchRequestRepository matchRequestRepository;
+    @Autowired private MatchParticipantRepository matchParticipantRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private Long hostUserId, applicantUserId, hostRequestId, courseId;
@@ -81,5 +83,17 @@ class MatchApplyServiceTest {
         // 신청자 본인의 게시글은 이번 신청과 무관하게 그대로 SEARCHING으로 유지된다
         // (신청은 이제 신청자 본인 게시글과 완전히 분리된 동작).
         assertThat(updatedApplicant.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    @Test
+    void 신청을_취소하면_참여_연결이_해제되어_같은_사람이_다시_참여할_수_있다() {
+        Long activityMatchId = matchApplyService.apply(applicantUserId, hostRequestId);
+
+        matchApplyService.cancelApplication(applicantUserId, hostRequestId);
+
+        var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
+        // released_at이 안 채워지면 uq_participant_active_user 제약 때문에 이 두 사람은
+        // 다시는 어떤 매칭에도 참여할 수 없게 된다 — 그걸 막는 회귀 테스트.
+        assertThat(participants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
     }
 }

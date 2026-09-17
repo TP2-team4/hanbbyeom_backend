@@ -95,6 +95,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(e.getMessage()));
     }
 
+    // 8-1. 호스트 본인 게시글에 응답 대기 중인 신청이 없을 때 — 권한 문제가 아니라 리소스가
+    // 없는 것이므로 위 8번(403)과 분리해서 404로 응답한다.
+    @ExceptionHandler(PendingApplicationNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePendingApplicationNotFound(PendingApplicationNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
+    }
+
     // 9. 로그인 인증 실패 (이메일 불일치 또는 비밀번호 불일치)
     // AuthenticationManager는 "사용자 없음"도 BadCredentialsException으로 바꿔서 던짐
     // → 두 경우가 애초에 같은 예외로 도착하고, 여기서 고정 문구를 쓰므로 응답도 완전히 동일
