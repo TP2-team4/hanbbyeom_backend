@@ -99,4 +99,10 @@ public class User {
         this.defaultTalkLevel = Objects.requireNonNull(defaultTalkLevel);
         this.emailVerifiedAt = emailVerifiedAt;
     }
+
+    // 마이페이지에서 변경한 기본 대화 수준만 수정
+    // 기존 모집글과 매칭은 생성 당시 값을 별도로 저장하므로 이 설정 변경의 영향을 받지 않음
+    public void changeDefaultTalkLevel(DefaultTalkLevel defaultTalkLevel) {
+        this.defaultTalkLevel = Objects.requireNonNull(defaultTalkLevel);
+    }
 }
