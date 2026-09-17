@@ -6,6 +6,7 @@ import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
 import com.team4.hanbbyeom.run.service.RunConditionService;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -111,13 +112,38 @@ class JwtAuthenticationIntegrationTest {
     // 만료된 토큰처럼 비정상 상황은 발급 시각·만료 시각·서명 키를 직접 지정해서 만들어야 함
     // → 운영 코드를 테스트 때문에 고치지 않아도 되고, sleep 없이 즉시 검증 가능
     private String buildToken(Long userId, Instant issuedAt, Instant expiration, SecretKey key) {
-        return Jwts.builder()
-                .subject(String.valueOf(userId))
-                .issuer(jwtProperties.issuer())
+        return buildToken(String.valueOf(userId), jwtProperties.issuer(), issuedAt, expiration, key);
+    }
+
+    // subject와 발급자까지 직접 지정하는 토큰 생성기 (경계 테스트용)
+    // subject에 null을 넘기면 sub 클레임 자체를 넣지 않음
+    private String buildToken(
+            String subject,
+            String issuer,
+            Instant issuedAt,
+            Instant expiration,
+            SecretKey key
+    ) {
+        JwtBuilder builder = Jwts.builder()
+                .issuer(issuer)
                 .issuedAt(Date.from(issuedAt))
                 .expiration(Date.from(expiration))
-                .signWith(key)
-                .compact();
+                .signWith(key);
+
+        if (subject != null) {
+            builder.subject(subject);
+        }
+
+        return builder.compact();
+    }
+
+    // 보호 API에 주어진 Authorization 헤더로 요청을 보내고, 401과 invalid_token 응답을 기대
+    // 경계 케이스 대부분이 "토큰을 보냈지만 인증 실패"라는 같은 결과를 확인하므로 공통으로 묶음
+    private void 보호_API_호출시_invalid_token_응답(String authorizationHeader) throws Exception {
+        mockMvc.perform(get("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, INVALID_TOKEN_CHALLENGE));
     }
 
     // 러닝 조건 픽스처 생성 (사용자 위조 방지 테스트용)
@@ -278,5 +304,124 @@ class JwtAuthenticationIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, INVALID_TOKEN_CHALLENGE));
+    }
+
+    // ---------------------------------------------------------------------
+    // 경계 케이스
+    // 위 핵심 테스트가 응답 형식(Content-Type·본문)까지 확인하므로,
+    // 아래에서는 "어떤 토큰이 어떤 판정을 받는가"에 집중해 상태코드와 인증 요구 헤더만 검증
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("만료된 토큰으로 보호 API 호출 시 401과 invalid_token 반환")
+    void 만료된_토큰_차단() throws Exception {
+        Long userId = createUser(randomEmail(), NICKNAME);
+
+        // 발급 시각을 과거로 지정해 이미 만료된 토큰을 만듦 (sleep 없이 만료 상황 재현)
+        Instant past = Instant.now().minusSeconds(3600);
+
+        보호_API_호출시_invalid_token_응답(
+                "Bearer " + buildToken(userId, past, past.plusSeconds(1), serviceKey()));
+    }
+
+    @Test
+    @DisplayName("발급자가 다른 토큰으로 보호 API 호출 시 401과 invalid_token 반환")
+    void 발급자_불일치_토큰_차단() throws Exception {
+        Long userId = createUser(randomEmail(), NICKNAME);
+        Instant now = Instant.now();
+
+        // 서명 키는 같지만 iss가 우리 서버 값이 아님
+        // → JwtTokenProvider의 requireIssuer 검증에 걸려야 함
+        보호_API_호출시_invalid_token_응답("Bearer " + buildToken(
+                String.valueOf(userId), "other-issuer", now, now.plusSeconds(1800), serviceKey()));
+    }
+
+    @Test
+    @DisplayName("sub가 없는 토큰으로 보호 API 호출 시 401과 invalid_token 반환")
+    void sub_없는_토큰_차단() throws Exception {
+        Instant now = Instant.now();
+
+        // 누구의 토큰인지 알 수 없으므로 인증할 수 없음
+        보호_API_호출시_invalid_token_응답("Bearer " + buildToken(
+                null, jwtProperties.issuer(), now, now.plusSeconds(1800), serviceKey()));
+    }
+
+    @Test
+    @DisplayName("sub가 숫자가 아닌 토큰으로 보호 API 호출 시 401과 invalid_token 반환")
+    void sub_형식_오류_토큰_차단() throws Exception {
+        Instant now = Instant.now();
+
+        // sub를 사용자 id(Long)로 변환하는 과정에서 실패해야 하며, 500이 아니라 401로 처리되어야 함
+        보호_API_호출시_invalid_token_응답("Bearer " + buildToken(
+                "not-a-number", jwtProperties.issuer(), now, now.plusSeconds(1800), serviceKey()));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 사용자 id의 토큰으로 보호 API 호출 시 401과 invalid_token 반환")
+    void 존재하지_않는_사용자_토큰_차단() throws Exception {
+        // 토큰 자체는 우리 서버가 정상 발급한 형식이지만 그런 사용자가 DB에 없음
+        // → 토큰만 믿지 않고 매 요청마다 사용자를 조회하기 때문에 걸러짐
+        보호_API_호출시_invalid_token_응답(
+                "Bearer " + jwtTokenProvider.createAccessToken(999_999_999L));
+    }
+
+    @Test
+    @DisplayName("JWT 형식이 아닌 문자열로 보호 API 호출 시 401과 invalid_token 반환")
+    void JWT_형식_오류_차단() throws Exception {
+        // Header.Payload.Signature 구조 자체가 아님 → 파싱 단계에서 실패
+        보호_API_호출시_invalid_token_응답("Bearer not-a-jwt");
+    }
+
+    @Test
+    @DisplayName("토큰 없이 Bearer 스킴만 보내면 401과 invalid_token 반환")
+    void 빈_Bearer_차단() throws Exception {
+        // 인증을 시도하긴 했으나 토큰이 비어 있는 경우
+        // → "인증 정보를 안 보낸 것"이 아니라 "잘못 보낸 것"으로 구분해서 처리
+        보호_API_호출시_invalid_token_응답("Bearer ");
+    }
+
+    @Test
+    @DisplayName("스킴이 소문자(bearer)여도 정상 인증")
+    void 소문자_스킴_허용() throws Exception {
+        String email = randomEmail();
+        Long userId = createUser(email, NICKNAME);
+
+        // HTTP 인증 스킴은 대소문자를 구분하지 않는 것이 표준
+        mockMvc.perform(get("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "bearer " + jwtTokenProvider.createAccessToken(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(userId))
+                .andExpect(jsonPath("$.email").value(email));
+    }
+
+    @Test
+    @DisplayName("Bearer가 아닌 인증 방식은 인증 미시도로 처리해 401과 Bearer 요구 헤더 반환")
+    void Bearer가_아닌_스킴() throws Exception {
+        // Basic 인증은 우리가 처리하는 방식이 아니므로 JWT 인증을 시도하지 않음
+        // → "잘못된 토큰"이 아니라 "인증 정보를 안 보낸 것"과 같은 취급 (invalid_token이 아님)
+        mockMvc.perform(get("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA=="))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, BEARER_CHALLENGE));
+    }
+
+    @Test
+    @DisplayName("인증된 요청 직후의 토큰 없는 요청은 401 (요청 간 인증 정보 누수 없음)")
+    void 요청_간_SecurityContext_누수_없음() throws Exception {
+        Long userId = createUser(randomEmail(), NICKNAME);
+
+        // 1. 정상 토큰으로 인증에 성공
+        mockMvc.perform(get("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer " + jwtTokenProvider.createAccessToken(userId)))
+                .andExpect(status().isOk());
+
+        // 2. 바로 다음 요청은 토큰이 없으므로 앞 요청의 인증 정보가 남아 있으면 안 됨
+        // → SecurityContext는 요청을 처리하는 스레드에 보관되고, Spring Security가 요청이 끝날 때 비움
+        //   (STATELESS 설정은 이 값을 세션에 저장하지 않게 하는 별개의 설정)
+        mockMvc.perform(get("/api/users/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, BEARER_CHALLENGE));
     }
 }
