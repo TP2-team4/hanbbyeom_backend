@@ -15,6 +15,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // 조건을 만족하는 활성 사용자 1명을 Optional로 반환
     Optional<User> findByEmailAndDeletedAtIsNull(String email);
 
+    // JWT 요청 인증 시 토큰의 subject에서 꺼낸 사용자 ID로 활성 사용자를 찾는 용도
+    // SELECT 대상: User
+    // WHERE id = :id
+    //   AND deleted_at IS NULL
+    // 사용자가 존재하지 않거나 탈퇴한 경우 빈 Optional을 반환
+    Optional<User> findByIdAndDeletedAtIsNull(Long id);
+
     // 회원가입 시 탈퇴하지 않은 동일 이메일 사용자의 중복 가입 방지 용도
     // SELECT 존재 여부
     // WHERE email = :email

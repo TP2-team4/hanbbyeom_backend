@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.controller;
 
+import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
@@ -7,13 +8,17 @@ import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 
 @Tag(name = "Matching - Requests", description = "모집글 등록/조회/수정/취소 API")
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/matching/requests")
 public class MatchRequestController {
@@ -36,9 +41,9 @@ public class MatchRequestController {
     @PostMapping
     public ResponseEntity<Void> create(
             @RequestBody MatchRequestCreateRequest request,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        Long id = matchRequestCommandService.create(currentUserId, request);
+        Long id = matchRequestCommandService.create(principal.getUserId(), request);
         return ResponseEntity.created(URI.create("/api/matching/requests/" + id)).build();
     }
 
@@ -49,9 +54,9 @@ public class MatchRequestController {
     @GetMapping("/{id}")
     public MatchRequestResponse getDetail(
             @PathVariable Long id,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        return matchRequestBoardService.getDetail(id, currentUserId);
+        return matchRequestBoardService.getDetail(id, principal.getUserId());
     }
 
     // 내 게시글에 온 대기 중인 신청 1건 조회 — applicant-profile, accept/reject
@@ -61,9 +66,9 @@ public class MatchRequestController {
     @GetMapping("/{id}/pending-application")
     public PendingApplicationResponse getPendingApplication(
             @PathVariable Long id,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        return matchRequestBoardService.getPendingApplication(currentUserId, id);
+        return matchRequestBoardService.getPendingApplication(principal.getUserId(), id);
     }
 
     // 모집글 수정 — 요청 바디(MatchRequestUpdateRequest)엔 일정(scheduledAt)과 대화 수준만
@@ -75,9 +80,9 @@ public class MatchRequestController {
     public ResponseEntity<Void> update(
             @PathVariable Long id,
             @RequestBody MatchRequestUpdateRequest request,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        matchRequestCommandService.update(currentUserId, id, request);
+        matchRequestCommandService.update(principal.getUserId(), id, request);
         return ResponseEntity.noContent().build();
     }
 
@@ -89,9 +94,9 @@ public class MatchRequestController {
     @PostMapping("/{id}/cancel")
     public ResponseEntity<Void> cancel(
             @PathVariable Long id,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        matchRequestCommandService.cancel(currentUserId, id);
+        matchRequestCommandService.cancel(principal.getUserId(), id);
         return ResponseEntity.noContent().build();
     }
 }

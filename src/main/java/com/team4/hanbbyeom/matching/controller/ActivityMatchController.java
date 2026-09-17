@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.controller;
 
+import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
@@ -8,13 +9,17 @@ import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @Tag(name = "Matching - Matches", description = "확정 매칭(activity_match) 관련 API")
+// Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/matching/matches")
 public class ActivityMatchController {
@@ -37,8 +42,12 @@ public class ActivityMatchController {
     @GetMapping("/{activityMatchId}/applicant-profile")
     public TrustProfileResponse getApplicantProfile(
             @PathVariable Long activityMatchId,
-            @RequestHeader("X-USER-ID") Long currentUserId // TODO: 담당 A 인증 방식으로 교체
+            // @AuthenticationPrincipal: JWT 인증 필터가 SecurityContext에 넣어둔 인증된 사용자 정보
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
+        // 아래 호스트 본인 확인에서 사용하므로 사용자 id를 먼저 꺼내둠
+        Long currentUserId = principal.getUserId();
+
         List<MatchParticipant> participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
 
         MatchParticipant host = participants.stream()
@@ -66,9 +75,9 @@ public class ActivityMatchController {
     @PostMapping("/{activityMatchId}/accept")
     public MatchConfirmResponse accept(
             @PathVariable Long activityMatchId,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        return matchDecisionService.accept(currentUserId, activityMatchId);
+        return matchDecisionService.accept(principal.getUserId(), activityMatchId);
     }
 
     // 호스트 거절 — REJECTED 전이 + 양쪽 게시글 SEARCHING 복귀(신청자는 있을 때만).
@@ -77,9 +86,9 @@ public class ActivityMatchController {
     @PostMapping("/{activityMatchId}/reject")
     public ResponseEntity<Void> reject(
             @PathVariable Long activityMatchId,
-            @RequestHeader("X-USER-ID") Long currentUserId
+            @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        matchDecisionService.reject(currentUserId, activityMatchId);
+        matchDecisionService.reject(principal.getUserId(), activityMatchId);
         return ResponseEntity.noContent().build();
     }
 }
