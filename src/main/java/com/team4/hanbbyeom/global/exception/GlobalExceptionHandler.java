@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.global.exception;
 
 import com.team4.hanbbyeom.matching.exception.*;
+import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -146,7 +147,20 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 13. 예상하지 못한 예외 처리
+    // 13. 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
+    // 원래 RunExceptionHandler(별도 @RestControllerAdvice)에 있었으나, 서로 다른
+    // @RestControllerAdvice로 나뉘면 Spring이 먼저 평가되는 Advice 빈에서 매칭되는
+    // 핸들러를 찾는 순간 멈춰버려서, catch-all이 있는 이 클래스가 먼저 평가될 경우
+    // 이 핸들러까지 도달하지 못하고 14번 catch-all(500)로 빠지는 문제가 있었음
+    // → 모든 구체적인 핸들러를 이 클래스 하나에 모아서 그런 순서 의존성을 없앤다
+    @ExceptionHandler(RunMatchConditionNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 14. 예상하지 못한 예외 처리
     // 위 핸들러들 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
     // 3·4번과 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음
