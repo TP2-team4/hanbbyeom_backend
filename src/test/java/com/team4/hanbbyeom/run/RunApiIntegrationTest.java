@@ -1,6 +1,5 @@
 package com.team4.hanbbyeom.run;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
@@ -17,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
 
@@ -41,9 +41,13 @@ public class RunApiIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
-    // Spring Bean으로 주입받지 않는 이유: 요청 바디를 문자열로 직렬화(record → JSON)하는
-    // 용도로만 쓰고 역직렬화는 하지 않아서, 별도 설정 없는 기본 ObjectMapper로도 충분함
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    // tools.jackson(Jackson 3) 패키지로 주입받는 이유: Spring Boot 4의 spring-boot-starter-webmvc가
+    // 기본으로 쓰는 JSON 라이브러리가 Jackson 3(tools.jackson)이라 Controller가 실제로 역직렬화할 때도
+    // 이 라이브러리를 씀. com.fasterxml.jackson(Jackson 2)는 jjwt-jackson이 전이 의존성으로 끌고 온
+    // 별개의 라이브러리라, 그걸로 직렬화하면 운영 코드가 쓰는 것과 다른 라이브러리로 테스트하게 되어
+    // 미묘한 직렬화 차이를 놓칠 수 있음
+    @Autowired
+    private ObjectMapper objectMapper;
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
     @Autowired
@@ -133,7 +137,7 @@ public class RunApiIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
                 .andExpect(status().isNoContent());
 
-        // 삭제 후 재조회 — RunExceptionHandler가 404로 매핑하는지 확인
+        // 삭제 후 재조회 — GlobalExceptionHandler가 404로 매핑하는지 확인
         mockMvc.perform(get("/api/run/conditions/{id}", matchRequestId)
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
                 .andExpect(status().isNotFound());
