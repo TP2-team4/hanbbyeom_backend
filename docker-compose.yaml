@@ -2,6 +2,10 @@ services:
   db:
     image: postgres:15
     restart: unless-stopped
+    # t3.micro(메모리 1GB) 기준 app/db/OS가 나눠 써야 하므로 명시적으로 제한.
+    # 이게 없으면 app 컨테이너의 -XX:MaxRAMPercentage가 호스트 전체 메모리 기준으로
+    # 계산되어(1GB의 75%) OOM 방지 효과가 사실상 없어짐.
+    mem_limit: 300m
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -17,6 +21,10 @@ services:
   app:
     image: shppark/hanbbyeom-backend:latest
     restart: unless-stopped
+    # 이 제한이 있어야 Dockerfile의 -XX:MaxRAMPercentage=75.0이 "이 컨테이너에 할당된
+    # 500m의 75%(~375MB)"를 힙으로 쓰겠다는 뜻이 됨. db(300m) + app(500m) = 800m로
+    # t3.micro 1GB 안에서 OS/Docker 데몬용 여유(~200m)를 남겨둠.
+    mem_limit: 500m
     depends_on:
       db:
         condition: service_healthy
