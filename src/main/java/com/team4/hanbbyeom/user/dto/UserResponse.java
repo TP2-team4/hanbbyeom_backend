@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.user.dto;
 
 import com.team4.hanbbyeom.user.domain.User;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 // 내 정보 조회(GET /api/users/me) 응답 데이터
 
@@ -12,9 +13,16 @@ import com.team4.hanbbyeom.user.domain.User;
 // SignUpResponse와 필드 구성이 같지만 재사용하지 않고 따로 만든 이유
 // → 회원가입 응답과 내 정보 조회 응답은 서로 다른 API 약속(계약)이라,
 //   한쪽 요구사항이 바뀌었을 때 다른 쪽까지 같이 바뀌어버리면 안 됨
+@Schema(description = "내 정보 조회 응답. Access Token의 소유자 본인 정보만 반환됩니다.")
 public record UserResponse(
+
+        @Schema(description = "사용자 식별자", example = "1")
         Long id,
+
+        @Schema(description = "가입된 이메일", example = "runner@example.com")
         String email,
+
+        @Schema(description = "서비스에서 표시되는 닉네임", example = "한뼘러너")
         String nickname
 ) {
 
