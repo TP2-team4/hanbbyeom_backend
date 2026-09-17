@@ -6,6 +6,7 @@ import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.dto.ActivityMatchStatusResponse;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
@@ -61,7 +62,7 @@ public class ActivityMatchController {
             @AuthenticationPrincipal CustomUserDetails principal
     ) {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         List<MatchParticipant> participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
         boolean isParticipant = participants.stream()
@@ -97,7 +98,7 @@ public class ActivityMatchController {
         MatchParticipant host = participants.stream()
                 .filter(p -> "A".equals(p.getSlot()))
                 .findFirst()
-                .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         // 본인(호스트)이 아닌 사람이 신청자 프로필을 보려 하면 차단
         if (!host.getUserId().equals(currentUserId)) {

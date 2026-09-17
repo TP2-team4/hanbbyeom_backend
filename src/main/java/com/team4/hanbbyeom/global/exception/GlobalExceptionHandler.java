@@ -117,6 +117,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
+    // 8-3. activityMatchId로 조회했는데 매칭 자체가 존재하지 않을 때 — 8번(403, "존재는 하지만
+    // 본인과 무관함")과 구분해서 404로 응답한다. 원래 이 케이스도 NotMatchParticipantException
+    // (403)으로 던지면서 메시지만 "존재하지 않는 매칭이에요"라고 되어 있어 상태 코드와 메시지가
+    // 어긋나 있었다(PR #57 리뷰 피드백으로 발견).
+    @ExceptionHandler(ActivityMatchNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleActivityMatchNotFound(ActivityMatchNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
+    }
+
     // 9. 로그인 인증 실패 (이메일 불일치 또는 비밀번호 불일치)
     // AuthenticationManager는 "사용자 없음"도 BadCredentialsException으로 바꿔서 던짐
     // → 두 경우가 애초에 같은 예외로 도착하고, 여기서 고정 문구를 쓰므로 응답도 완전히 동일

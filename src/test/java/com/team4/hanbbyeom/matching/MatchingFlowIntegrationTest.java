@@ -175,6 +175,21 @@ class MatchingFlowIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    // 회귀 테스트: 존재하지 않는 activityMatchId로 조회하면 403이 아니라 404가 나가야 한다.
+    // 원래는 이 경우도 NotMatchParticipantException(403)을 던지면서 메시지만 "존재하지
+    // 않는 매칭이에요"라 상태 코드와 메시지가 어긋나 있었다(PR #57 리뷰 피드백으로 발견) —
+    // ActivityMatchNotFoundException(404)으로 분리해서 위 제3자-403 케이스와 구분한다.
+    @Test
+    @DisplayName("존재하지 않는 매칭 건을 조회하면 403이 아니라 404가 반환된다")
+    void 존재하지_않는_매칭을_조회하면_404를_반환한다() throws Exception {
+        Long userId = createUser("사용자");
+
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", 999_999_999L)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(userId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("존재하지 않는 매칭이에요."));
+    }
+
     @Test
     @DisplayName("호스트가 거절하면 게시글이 다시 모집 탭에 노출된다")
     void 거절하면_게시글이_다시_노출된다() throws Exception {
