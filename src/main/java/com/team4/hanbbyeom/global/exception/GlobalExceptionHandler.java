@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.global.exception;
 
 import com.team4.hanbbyeom.matching.exception.*;
+import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -99,6 +100,20 @@ public class GlobalExceptionHandler {
     // 없는 것이므로 위 8번(403)과 분리해서 404로 응답한다.
     @ExceptionHandler(PendingApplicationNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePendingApplicationNotFound(PendingApplicationNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
+    }
+
+    // 8-2. 존재하지 않는 러닝 조건(run_match_condition) 조회/수정/삭제 시도.
+    // 원래 run.exception.RunExceptionHandler라는 별도 @RestControllerAdvice 클래스에
+    // 있었는데, Spring은 @ControllerAdvice 간 예외 타입 구체성을 전역으로 비교하지 않고
+    // "먼저 걸리는 advice 빈에 처리 가능한 핸들러가 있으면 거기서 멈추는" 방식이라, 패키지
+    // 스캔 순서상 이 클래스(GlobalExceptionHandler)가 RunExceptionHandler보다 먼저 잡혀서
+    // 11번(Exception.class, 500)이 RunMatchConditionNotFoundException까지 가로채버리는
+    // 실제 버그가 있었다(Postman으로 존재하지 않는 id 조회 시 404 대신 500 발생). 그래서
+    // 별도 클래스를 없애고 여기 하나로 합쳤다 — @RestControllerAdvice 클래스를 여러 개
+    // 두지 말 것.
+    @ExceptionHandler(RunMatchConditionNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
