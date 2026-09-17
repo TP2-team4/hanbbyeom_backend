@@ -219,4 +219,18 @@ public class RunApiIntegrationTest {
                         .content(objectMapper.writeValueAsString(createRequest)))
                 .andExpect(status().isUnauthorized());
     }
+
+    // 6. 애초에 존재한 적 없는 id로 조회하면 404 + 정확한 메시지가 나온다. 위 1번 테스트의
+    // "삭제 후 재조회" 케이스는 상태 코드만 확인하는데, 이 케이스는 응답 메시지까지 함께
+    // 검증해서 RunMatchConditionNotFoundException이 실제로 GlobalExceptionHandler를 거쳐
+    // 404로 매핑되는지 명확히 고정한다(PR 리뷰: 같은 버그를 검증하는 테스트가 run/ 패키지에
+    // 두 파일로 나뉘어 있던 것을 여기로 합침 — 원래 별도 파일이었던
+    // RunConditionControllerIntegrationTest는 삭제).
+    @Test
+    void 존재하지_않는_id로_조회하면_404와_정확한_메시지를_반환한다() throws Exception {
+        mockMvc.perform(get("/api/run/conditions/{id}", 999_999_999L)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("존재하지 않는 러닝 조건이에요. id=999999999"));
+    }
 }
