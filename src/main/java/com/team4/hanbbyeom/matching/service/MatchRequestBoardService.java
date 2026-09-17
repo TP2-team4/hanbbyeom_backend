@@ -1,10 +1,18 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.matching.domain.ActivityMatch;
+import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
+import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
+import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.time.*;
@@ -16,10 +24,17 @@ import java.util.stream.Collectors;
 public class MatchRequestBoardService {
 
     private final MatchRequestRepository matchRequestRepository;
+    private final MatchParticipantRepository matchParticipantRepository;
+    private final ActivityMatchRepository activityMatchRepository;
     private final JdbcTemplate jdbcTemplate;
 
-    public MatchRequestBoardService(MatchRequestRepository matchRequestRepository, JdbcTemplate jdbcTemplate) {
+    public MatchRequestBoardService(MatchRequestRepository matchRequestRepository,
+                                    MatchParticipantRepository matchParticipantRepository,
+                                    ActivityMatchRepository activityMatchRepository,
+                                    JdbcTemplate jdbcTemplate) {
         this.matchRequestRepository = matchRequestRepository;
+        this.matchParticipantRepository = matchParticipantRepository;
+        this.activityMatchRepository = activityMatchRepository;
         this.jdbcTemplate = jdbcTemplate;
     }
 
@@ -128,5 +143,30 @@ public class MatchRequestBoardService {
                 pendingApplicantCount,
                 new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
         );
+    }
+
+    // 호스트 본인 게시글(matchRequestId)에 온 대기 중인 신청 1건 조회
+    // applicant-profile, accept/reject API와 이어서 쓰기 위해 activityMatchId만 최소한으로 내려준다.
+    public PendingApplicationResponse getPendingApplication(Long hostUserId, Long matchRequestId) {
+        // 1) 게시글 존재 여부 + 본인 소유 검증
+        MatchRequest matchRequest = matchRequestRepository.findById(matchRequestId)
+                .orElseThrow(() -> new MatchRequestNotFoundException(matchRequestId));
+        if (!matchRequest.isOwnedBy(hostUserId)) {
+            throw new AccessDeniedException("본인 게시글의 신청만 조회할 수 있어요.");
+        }
+
+        // 2) 활성 참여 행에서 activityMatchId 역조회 (MatchApplyService.cancelApplication()과 동일한 방식)
+        Long activityMatchId = matchParticipantRepository.findActiveActivityMatchIdByMatchRequestId(matchRequestId)
+                .orElseThrow(() -> new NotMatchParticipantException("대기 중인 신청이 없어요."));
+
+        // 3) released_at이 아직 안 채워지는 이슈 때문에, 이미 끝난(CONFIRMED/REJECTED/EXPIRED)
+        //    매칭도 위 조회에 걸릴 수 있어 상태까지 재확인한다 — PROPOSED일 때만 "대기 중"이다.
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
+                .orElseThrow(() -> new NotMatchParticipantException("대기 중인 신청이 없어요."));
+        if (activityMatch.getStatus() != ActivityMatchStatus.PROPOSED) {
+            throw new NotMatchParticipantException("대기 중인 신청이 없어요.");
+        }
+
+        return new PendingApplicationResponse(activityMatchId, activityMatch.getDecisionExpiresAt());
     }
 }
