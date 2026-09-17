@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.dto;
 
+import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import com.team4.hanbbyeom.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -14,7 +15,12 @@ public record SignUpResponse(
         String email,
 
         @Schema(description = "가입된 닉네임", example = "한뼘러너")
-        String nickname
+        String nickname,
+
+        // 회원가입 결과에 실제 저장된 설정값을 포함해 클라이언트가 확인할 수 있도록 함
+        @Schema(description = "모집글 작성 시 기본으로 사용할 대화 수준",
+                example = "SILENT", allowableValues = {"SILENT", "LIGHT_CHAT"})
+        DefaultTalkLevel defaultTalkLevel
 ) {
 
     // from() 정의: User Entity를 받아서 SignUpResponse DTO로 변환하는 정적 메서드
@@ -22,7 +28,8 @@ public record SignUpResponse(
         return new SignUpResponse(
                 user.getId(), // DB에 저장되면서 자동 생성된 User Entity의 id 값
                 user.getEmail(),
-                user.getNickname()
+                user.getNickname(),
+                user.getDefaultTalkLevel()
         );
     }
 }
