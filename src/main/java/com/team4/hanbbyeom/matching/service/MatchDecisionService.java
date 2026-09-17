@@ -93,6 +93,11 @@ public class MatchDecisionService {
         host.reject();
         activityMatch.reject(hostUserId);
 
+        // 매칭이 무산됐으므로 두 참여 연결 모두 해제 — 안 하면 이 두 사람이 다시는
+        // 매칭에 참여할 수 없게 된다(uq_participant_active_user 부분 유니크 인덱스 때문).
+        host.release();
+        applicant.release();
+
         transitionBothRequests(host, applicant, MatchRequestStatus.SEARCHING);
     }
 
@@ -122,6 +127,10 @@ public class MatchDecisionService {
                     .filter(p -> "B".equals(p.getSlot()))
                     .findFirst()
                     .orElseThrow(() -> new NotMatchParticipantException("존재하지 않는 매칭이에요."));
+
+            // reject()와 동일하게 매칭이 무산됐으므로 두 참여 연결 모두 해제
+            host.release();
+            applicant.release();
 
             transitionBothRequests(host, applicant, MatchRequestStatus.SEARCHING);
         }
