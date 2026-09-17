@@ -35,7 +35,7 @@ public class AuthController {
     public ResponseEntity<SignUpResponse> signUp(@Valid @RequestBody SignUpRequest request) {
         SignUpResponse response = authService.signUp(request);
 
-        // body에 회원가입 결과(id, email, nickname)를 담아 200 OK 반환
+        // body에 회원가입 결과(id, email, nickname, defaultTalkLevel)를 담아 200 OK 반환
         // 가입된 사용자 정보를 돌려줘야 하므로 ok가 아니라 ok(response)
         return ResponseEntity
                 .ok(response);

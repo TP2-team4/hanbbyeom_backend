@@ -3,6 +3,8 @@ package com.team4.hanbbyeom.user.domain;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -15,6 +17,8 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
+import java.util.Objects;
+
 // OffsetDateTime: 날짜·시간과 UTC 기준 시차를 함께 표현
 // Instant: 전 세계에서 동일한 하나의 UTC 시점을 표현
 // TIMESTAMPTZ는 원래 시차를 보존하는 것이 아닌 동일한 시점을 저장하므로 Instant 사용
@@ -51,6 +55,11 @@ public class User {
     @Column(name = "nickname", length = 50)
     private String nickname;
 
+    // 모집글 작성 화면에 기본으로 적용할 대화 수준 (탈퇴 시 NULL)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "default_talk_level", length = 20)
+    private DefaultTalkLevel defaultTalkLevel;
+
     // 회원가입 이메일 인증 완료 시각 (탈퇴 시 NULL)
     @Column(name = "email_verified_at")
     private Instant emailVerifiedAt;
@@ -77,6 +86,7 @@ public class User {
             String email,
             String passwordHash,
             String nickname,
+            DefaultTalkLevel defaultTalkLevel,
             Instant emailVerifiedAt
             // deletedAt                → 활성 회원이므로 NULL
             // createdAt                → JPA Auditing이 자동 기록
@@ -85,6 +95,8 @@ public class User {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
+        // requireNonNull: 값이 null인지 검사하고, null이면 바로 예외를 발생시키는 메서드(아니면 그대로 반환)
+        this.defaultTalkLevel = Objects.requireNonNull(defaultTalkLevel);
         this.emailVerifiedAt = emailVerifiedAt;
     }
 }
