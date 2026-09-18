@@ -7,13 +7,16 @@ import java.time.OffsetDateTime;
 // status 값으로 구분하기 위한 용도 — 기존엔 이걸 구분할 방법이 없었다(host의 match_request가
 // REJECTED/EXPIRED 둘 다 그냥 SEARCHING으로 돌아가서 신청자 쪽에서 원인을 알 수 없었음).
 //
-// 채팅 이슈의 "매칭 요약 조회" API와 같은 엔드포인트(GET /api/matching/matches/{id})를
-// 쓸 예정이므로, 새 필드가 필요하면 별도 응답/엔드포인트를 만들지 말고 이 record에 이어서
-// 확장할 것(예: courseName, location, scheduledAt 등) — 팀 리뷰로 합의된 방향.
+// 채팅방 상단에서도 같은 엔드포인트를 사용하므로 상대 사용자 ID와 코스·장소·예정 시간을 함께 반환.
 public record ActivityMatchStatusResponse(
         Long activityMatchId,
         String status, // "PROPOSED" | "CONFIRMED" | "REJECTED" | "EXPIRED" | "ENDED"
         String meetingCode, // CONFIRMED일 때만 값이 있음
         OffsetDateTime confirmedAt, // CONFIRMED일 때만
-        OffsetDateTime closedAt // REJECTED/EXPIRED/ENDED일 때만
+        OffsetDateTime closedAt, // REJECTED/EXPIRED/ENDED일 때만
+        Long counterpartUserId,
+        String courseName,
+        String location,
+        OffsetDateTime scheduledAt,
+        OffsetDateTime scheduledEndAt
 ) {}

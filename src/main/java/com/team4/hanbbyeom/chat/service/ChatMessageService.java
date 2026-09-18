@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.chat.service;
 
 import com.team4.hanbbyeom.chat.domain.ChatMessage;
+import com.team4.hanbbyeom.chat.dto.ChatListItemResponse;
 import com.team4.hanbbyeom.chat.dto.ChatMessageResponse;
 import com.team4.hanbbyeom.chat.dto.ChatMessageSendRequest;
 import com.team4.hanbbyeom.chat.exception.ChatUnavailableException;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 // 채팅 참가 권한과 매칭 상태를 확인한 뒤 메시지 조회·저장을 처리
@@ -27,6 +29,24 @@ public class ChatMessageService {
     private final ChatMessageRepository chatMessageRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
+
+    public List<ChatListItemResponse> getChatList(Long currentUserId) {
+        return chatMessageRepository.findChatListByUserId(currentUserId).stream()
+                .map(row -> new ChatListItemResponse(
+                        row.getActivityMatchId(),
+                        row.getCounterpartUserId(),
+                        row.getStatus(),
+                        row.getCourseName(),
+                        row.getLocation(),
+                        row.getScheduledAt().atOffset(ZoneOffset.UTC),
+                        row.getScheduledEndAt().atOffset(ZoneOffset.UTC),
+                        row.getLastMessage(),
+                        row.getLastMessageAt() == null
+                                ? null
+                                : row.getLastMessageAt().atOffset(ZoneOffset.UTC)
+                ))
+                .toList();
+    }
 
     public List<ChatMessageResponse> getMessages(Long currentUserId, Long activityMatchId, long afterId) {
         if (afterId < 0) {
