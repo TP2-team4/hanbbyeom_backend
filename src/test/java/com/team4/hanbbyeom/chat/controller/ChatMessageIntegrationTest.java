@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.chat.domain.ChatMessage;
 import com.team4.hanbbyeom.chat.repository.ChatMessageRepository;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -11,12 +12,17 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -30,6 +36,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class ChatMessageIntegrationTest {
 
+    private static final ZoneId SERVICE_ZONE = ZoneId.of("Asia/Seoul");
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -41,6 +49,14 @@ class ChatMessageIntegrationTest {
 
     @Autowired
     private ChatMessageRepository chatMessageRepository;
+
+    @MockitoBean
+    private Clock clock;
+
+    @BeforeEach
+    void 현재_시각을_테스트가_시작된_시점으로_고정한다() {
+        setCurrentTime(OffsetDateTime.now(SERVICE_ZONE));
+    }
 
     @Test
     void 참가자가_메시지를_전송하면_JWT_사용자가_발신자로_저장된다() throws Exception {
@@ -134,17 +150,72 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 종료된_매칭에는_새_메시지를_보낼_수_없다() throws Exception {
-        TestMatch match = createMatch(ActivityMatchStatus.ENDED, true);
+    void 종료_상태여도_활동_예정일_자정_직전에는_새_메시지를_보낼_수_있다() throws Exception {
+        OffsetDateTime fixedNow = OffsetDateTime.parse("2026-09-18T23:59:59.999999999+09:00");
+        setCurrentTime(fixedNow);
+        TestMatch match = createMatch(
+                ActivityMatchStatus.ENDED,
+                OffsetDateTime.parse("2026-09-18T19:00:00+09:00"),
+                OffsetDateTime.parse("2026-09-18T21:00:00+09:00")
+        );
 
-        assertMessageSendConflict(match);
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content": "변경된 시간에 맞춰 도착할게요."}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.senderId").value(match.hostId()))
+                .andExpect(jsonPath("$.content").value("변경된 시간에 맞춰 도착할게요."));
     }
 
     @Test
-    void 종료_스케줄러가_아직_실행되지_않아도_예정_종료_시각이_지나면_전송을_거부한다() throws Exception {
-        TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, true);
+    void 일반_활동은_예정일_다음날_자정부터_새_메시지를_보낼_수_없다() throws Exception {
+        setCurrentTime(OffsetDateTime.parse("2026-09-19T00:00:00+09:00"));
+        TestMatch match = createMatch(
+                ActivityMatchStatus.ENDED,
+                OffsetDateTime.parse("2026-09-18T19:00:00+09:00"),
+                OffsetDateTime.parse("2026-09-18T21:00:00+09:00")
+        );
 
-        assertMessageSendConflict(match);
+        assertMessageSendTimeConflict(match);
+    }
+
+    @Test
+    void 자정을_넘겨_끝나는_심야_활동은_예정_종료_시각까지_전송할_수_있다() throws Exception {
+        setCurrentTime(OffsetDateTime.parse("2026-09-19T00:30:00+09:00"));
+        TestMatch match = createMatch(
+                ActivityMatchStatus.CONFIRMED,
+                OffsetDateTime.parse("2026-09-18T23:00:00+09:00"),
+                OffsetDateTime.parse("2026-09-19T01:00:00+09:00")
+        );
+
+        assertMessageSendCreated(match, "심야 활동 중 메시지");
+    }
+
+    @Test
+    void 전송_마감_시각부터_새_메시지를_보낼_수_없다() throws Exception {
+        setCurrentTime(OffsetDateTime.parse("2026-09-19T01:00:00+09:00"));
+        TestMatch match = createMatch(
+                ActivityMatchStatus.CONFIRMED,
+                OffsetDateTime.parse("2026-09-18T23:00:00+09:00"),
+                OffsetDateTime.parse("2026-09-19T01:00:00+09:00")
+        );
+
+        assertMessageSendTimeConflict(match);
+    }
+
+    @Test
+    void 확정_후_취소_상태에는_전송_마감_전이어도_메시지를_보낼_수_없다() throws Exception {
+        setCurrentTime(OffsetDateTime.parse("2026-09-18T20:00:00+09:00"));
+        TestMatch match = createMatch(
+                ActivityMatchStatus.CANCELLED,
+                OffsetDateTime.parse("2026-09-18T19:00:00+09:00"),
+                OffsetDateTime.parse("2026-09-18T21:00:00+09:00")
+        );
+
+        assertMessageSendStateConflict(match);
     }
 
     @Test
@@ -203,7 +274,18 @@ class ChatMessageIntegrationTest {
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"));
     }
 
-    private void assertMessageSendConflict(TestMatch match) throws Exception {
+    private void assertMessageSendCreated(TestMatch match, String message) throws Exception {
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content": "%s"}
+                                """.formatted(message)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.content").value(message));
+    }
+
+    private void assertMessageSendTimeConflict(TestMatch match) throws Exception {
         mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -211,7 +293,18 @@ class ChatMessageIntegrationTest {
                                 {"content": "종료 후 메시지"}
                                 """))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("종료된 매칭에는 새 메시지를 보낼 수 없어요."));
+                .andExpect(jsonPath("$.message").value("채팅 가능 시간이 지나 새 메시지를 보낼 수 없어요."));
+    }
+
+    private void assertMessageSendStateConflict(TestMatch match) throws Exception {
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content": "취소 후 메시지"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("현재 매칭 상태에서는 새 메시지를 보낼 수 없어요."));
     }
 
     private ChatMessage saveMessage(Long activityMatchId, Long senderId, String content) {
@@ -243,7 +336,7 @@ class ChatMessageIntegrationTest {
         Long applicantId = createUser("채팅신청자");
         Long outsiderId = createUser("채팅제삼자");
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         OffsetDateTime createdAt;
         OffsetDateTime decisionExpiresAt;
         OffsetDateTime scheduledAt;
@@ -299,6 +392,54 @@ class ChatMessageIntegrationTest {
         createParticipant(activityMatchId, applicantId, "B", "ACCEPTED", releasedAt);
 
         return new TestMatch(activityMatchId, hostId, applicantId, outsiderId);
+    }
+
+    // 활동 예정일 경계 테스트에서 서버 현재 시각과 무관한 시작·종료 시각을 직접 지정
+    private TestMatch createMatch(
+            ActivityMatchStatus status,
+            OffsetDateTime scheduledAt,
+            OffsetDateTime scheduledEndAt
+    ) {
+        Long hostId = createUser("채팅호스트");
+        Long applicantId = createUser("채팅신청자");
+        Long outsiderId = createUser("채팅제삼자");
+
+        OffsetDateTime createdAt = scheduledAt.minusDays(1);
+        OffsetDateTime confirmedAt = createdAt.plusMinutes(30);
+        OffsetDateTime closedAt = status == ActivityMatchStatus.ENDED ? scheduledEndAt : null;
+
+        Long activityMatchId = jdbcTemplate.queryForObject(
+                """
+                INSERT INTO activity_match (
+                    scheduled_at, scheduled_end_at, talk_level, location, course_name,
+                    distance_min_meters, distance_max_meters, route_description,
+                    agreed_pace_min_sec, agreed_pace_max_sec, status,
+                    decision_expires_at, meeting_code, confirmed_at, closed_at, created_at
+                )
+                VALUES (?, ?, 'SILENT', '테스트 장소', '채팅 테스트 코스',
+                        5000, 8000, '테스트 경로', 360, 400, ?, ?, '123456', ?, ?, ?)
+                RETURNING id
+                """,
+                Long.class,
+                scheduledAt,
+                scheduledEndAt,
+                status.name(),
+                createdAt.plusHours(1),
+                confirmedAt,
+                closedAt,
+                createdAt
+        );
+
+        OffsetDateTime releasedAt = status == ActivityMatchStatus.ENDED ? closedAt : null;
+        createParticipant(activityMatchId, hostId, "A", "ACCEPTED", releasedAt);
+        createParticipant(activityMatchId, applicantId, "B", "ACCEPTED", releasedAt);
+
+        return new TestMatch(activityMatchId, hostId, applicantId, outsiderId);
+    }
+
+    private void setCurrentTime(OffsetDateTime currentTime) {
+        when(clock.instant()).thenReturn(currentTime.toInstant());
+        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     }
 
     private void createParticipant(

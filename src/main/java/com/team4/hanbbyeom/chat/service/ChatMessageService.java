@@ -16,7 +16,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 
@@ -26,9 +28,12 @@ import java.util.List;
 @Transactional(readOnly = true)
 public class ChatMessageService {
 
+    private static final ZoneId SERVICE_ZONE = ZoneId.of("Asia/Seoul");
+
     private final ChatMessageRepository chatMessageRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
+    private final Clock clock;
 
     public List<ChatListItemResponse> getChatList(Long currentUserId) {
         return chatMessageRepository.findChatListByUserId(currentUserId).stream()
@@ -107,12 +112,37 @@ public class ChatMessageService {
     }
 
     private void validateMessageSendable(ActivityMatch activityMatch) {
-        boolean confirmed = activityMatch.getStatus() == ActivityMatchStatus.CONFIRMED;
-        boolean beforeScheduledEnd = OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt());
+        boolean sendableStatus = activityMatch.getStatus() == ActivityMatchStatus.CONFIRMED
+                || activityMatch.getStatus() == ActivityMatchStatus.ENDED;
 
-        // 종료 스케줄러가 최대 1분 늦게 실행될 수 있으므로 status와 예정 종료 시각을 함께 확인
-        if (!confirmed || !beforeScheduledEnd) {
-            throw new ChatUnavailableException("종료된 매칭에는 새 메시지를 보낼 수 없어요.");
+        // 확정 후 취소 상태가 추가되더라도 자동으로 전송을 허용하지 않도록 현재 허용 상태만 명시
+        if (!sendableStatus) {
+            throw new ChatUnavailableException("현재 매칭 상태에서는 새 메시지를 보낼 수 없어요.");
+        }
+
+        // 약속 시간이 조금 늦어지더라도 같은 날에는 조율할 수 있도록 활동 예정일 자정까지 허용
+        // 23:59:59를 직접 비교하지 않고 다음 날 00:00 미만으로 검사해 시간 정밀도 차이를 피함
+        OffsetDateTime nextDayStart = activityMatch.getScheduledAt()
+                .atZoneSameInstant(SERVICE_ZONE)
+                .toLocalDate()
+                .plusDays(1)
+                .atStartOfDay(SERVICE_ZONE)
+                .toOffsetDateTime();
+
+        // sendDeadline의 오프셋 표기를 KST로 통일하기 위한 변환 (비교는 순간 기준이라 정확성과는 무관)
+        // → 변환 생략 시 분기에 따라 +09:00과 +00:00 혼재
+        OffsetDateTime scheduledEndAt = activityMatch.getScheduledEndAt()
+                .atZoneSameInstant(SERVICE_ZONE)
+                .toOffsetDateTime();
+
+        // 자정을 넘겨 끝나는 심야 활동은 예정 종료 시각까지 허용해 기존보다 마감이 빨라지지 않게 함
+        OffsetDateTime sendDeadline = nextDayStart.isAfter(scheduledEndAt)
+                ? nextDayStart
+                : scheduledEndAt;
+
+        // 매칭 종료 스케줄러가 ENDED로 전환했더라도 계산된 전송 마감 전에는 메시지 전송 가능
+        if (!OffsetDateTime.now(clock).isBefore(sendDeadline)) {
+            throw new ChatUnavailableException("채팅 가능 시간이 지나 새 메시지를 보낼 수 없어요.");
         }
     }
 }

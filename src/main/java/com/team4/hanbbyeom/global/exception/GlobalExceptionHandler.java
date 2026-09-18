@@ -138,7 +138,7 @@ public class GlobalExceptionHandler {
     }
 
     // CHAT: 채팅 이용 불가 상태 처리
-    // 매칭이 아직 확정되지 않았거나 이미 종료되어 새 메시지를 보낼 수 없는 경우에 해당
+    // 매칭이 아직 확정되지 않았거나 현재 상태·전송 가능 시간이 메시지 전송을 허용하지 않는 경우에 해당
     @ExceptionHandler(ChatUnavailableException.class)
     public ResponseEntity<ErrorResponse> handleChatUnavailable(ChatUnavailableException e) {
         return ResponseEntity

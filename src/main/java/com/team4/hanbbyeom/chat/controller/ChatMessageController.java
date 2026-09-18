@@ -52,7 +52,8 @@ public class ChatMessageController {
     // 채팅 메시지 전송: POST /api/matching/matches/{activityMatchId}/messages
     @Operation(
             summary = "채팅 메시지 전송",
-            description = "확정된 매칭이 종료되기 전까지 참가자가 메시지를 전송할 수 있습니다."
+            description = "확정된 매칭의 참가자는 활동 예정일 자정까지 메시지를 전송할 수 있습니다. " +
+                    "자정을 넘겨 끝나는 활동은 예정 종료 시각까지 전송할 수 있습니다."
     )
     @PostMapping
     public ResponseEntity<ChatMessageResponse> sendMessage(
