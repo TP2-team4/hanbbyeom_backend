@@ -47,6 +47,19 @@ public class MatchRequestController {
         return ResponseEntity.created(URI.create("/api/matching/requests/" + id)).build();
     }
 
+    // 내가 지금 갖고 있는 활성 모집글/신청 1건 조회 — 등록 직후 응답의 Location 헤더를
+    // 놓쳤거나 id를 모를 때도, 본인 토큰만으로 "지금 내 글이 뭔지" 바로 확인할 수 있게 한다.
+    // 활성 상태(SEARCHING/PENDING_CONFIRMATION/MATCHED)가 하나도 없으면 404.
+    @Operation(summary = "내 활성 모집글 조회",
+            description = "현재 로그인한 사용자가 갖고 있는 활성 모집글(SEARCHING/PENDING_CONFIRMATION/MATCHED)을 " +
+                    "1건 조회합니다. 없으면 404가 반환됩니다.")
+    @GetMapping("/me")
+    public MatchRequestResponse getMyActiveRequest(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return matchRequestBoardService.getMyActiveRequest(principal.getUserId());
+    }
+
     // 모집글 상세 조회 — 목록(board)과 달리 meetingPoint까지 포함하고, 조회자가 작성자
     // 본인인지(isOwner)와 대기 중인 신청자 수(pendingApplicantCount)도 같이 내려준다.
     @Operation(summary = "모집글 상세 조회",
