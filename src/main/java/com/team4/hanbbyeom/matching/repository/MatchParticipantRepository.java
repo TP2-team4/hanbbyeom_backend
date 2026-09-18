@@ -15,6 +15,10 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     // MatchApplyService.cancelApplication()에서 "이 매칭의 호스트/신청자가 각각 누구인지" 찾을 때 쓴다.
     List<MatchParticipant> findByActivityMatchId(Long activityMatchId);
 
+    // 채팅 접근 권한 확인용 — 매칭이 끝나 releasedAt이 채워진 참가자도 과거 메시지는
+    // 계속 조회할 수 있어야 하므로 활성 여부 조건 없이 매칭과 사용자 ID만 확인한다.
+    boolean existsByActivityMatchIdAndUserId(Long activityMatchId, Long userId);
+
     // 컨트롤러/프론트가 알고 있는 건 "게시글 id(matchRequestId)"뿐이고, 실제로 상태를 바꿔야 할
     // activity_match의 id는 모르는 상황(신청 취소 API)을 위한 역조회 쿼리.
     // releasedAt IS NULL 조건이 핵심: 한 게시글에 대해 "현재 유효한(아직 안 끝난)" 참여 연결은

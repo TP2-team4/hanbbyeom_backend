@@ -29,7 +29,7 @@ class UserRepositoryTest {
 
     @Test // 테스트 메서드
     @DisplayName("탈퇴하지 않은 사용자를 이메일로 조회") // 테스트 결과 화면에서 읽기 좋은 이름으로 보여줌
-    void findByEmailAndDeletedAtIsNullReturnsUser() {
+    void 활성_사용자_이메일_조회() {
         // 기존 데이터와 이메일이 겹치지 않는 테스트 사용자 생성
         String email = "repository-" + UUID.randomUUID() + "@example.com";
         User user = new User(
@@ -59,8 +59,8 @@ class UserRepositoryTest {
     }
 
     @Test
-    @DisplayName("대문자가 포함된 이메일 저장을 거부")
-    void saveRejectsUppercaseEmail() {
+    @DisplayName("대문자가 포함된 이메일 저장 거부")
+    void 대문자_이메일_저장_거부() {
         User user = new User(
                 "Repository-" + UUID.randomUUID() + "@example.com",
                 "encoded-password",
@@ -81,8 +81,8 @@ class UserRepositoryTest {
     }
 
     @Test
-    @DisplayName("앞뒤 공백이 포함된 이메일 저장을 거부")
-    void saveRejectsEmailWithSurroundingWhitespace() {
+    @DisplayName("앞뒤 공백이 포함된 이메일 저장 거부")
+    void 공백_포함_이메일_저장_거부() {
         User user = new User(
                 " repository-" + UUID.randomUUID() + "@example.com ",
                 "encoded-password",

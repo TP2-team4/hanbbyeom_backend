@@ -69,10 +69,18 @@ public class ActivityMatch {
 
     protected ActivityMatch() {}
 
+    // createdAt을 파라미터로 받는 이유: 여기서 OffsetDateTime.now()를 다시 호출하면, 호출자가
+    // decisionExpiresAt을 계산할 때 쓴 now와 실제로 저장되는 createdAt이 서로 다른(created_at
+    // 쪽이 항상 더 늦은) 시각이 된다. decisionExpiresAt이 now+24시간처럼 큰 여유를 갖던 예전엔
+    // 문제가 안 됐지만, activity 시작 임박 시 decisionExpiresAt이 now에 바짝 붙을 수 있게 되면서
+    // (MatchApplyService.apply() 참고) 그 미세한 시간차만으로 chk_activity_match_time
+    // (created_at < decision_expires_at) 위반이 가능해졌다(팀원 리뷰로 발견한 회귀). 호출자가
+    // 검증에 쓴 시각을 그대로 넘겨받아 createdAt으로 쓰면, 그 가드가 정확히 이 제약도 보장한다.
     public ActivityMatch(OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, TalkLevel talkLevel,
                          String location, String courseName, Integer distanceMinMeters, Integer distanceMaxMeters,
                          String routeDescription,
-                         Integer agreedPaceMinSec, Integer agreedPaceMaxSec, OffsetDateTime decisionExpiresAt) {
+                         Integer agreedPaceMinSec, Integer agreedPaceMaxSec, OffsetDateTime decisionExpiresAt,
+                         OffsetDateTime createdAt) {
         this.scheduledAt = scheduledAt;
         this.scheduledEndAt = scheduledEndAt;
         this.talkLevel = talkLevel;
@@ -84,7 +92,7 @@ public class ActivityMatch {
         this.agreedPaceMinSec = agreedPaceMinSec;
         this.agreedPaceMaxSec = agreedPaceMaxSec;
         this.decisionExpiresAt = decisionExpiresAt;
-        this.createdAt = OffsetDateTime.now();
+        this.createdAt = createdAt;
     }
 
     public Long getId() { return id; }
@@ -94,6 +102,10 @@ public class ActivityMatch {
     public OffsetDateTime getClosedAt() { return closedAt; }
     public Long getClosedByUserId() { return closedByUserId; }
     public OffsetDateTime getDecisionExpiresAt() { return decisionExpiresAt; }
+    public OffsetDateTime getScheduledAt() { return scheduledAt; }
+    public OffsetDateTime getScheduledEndAt() { return scheduledEndAt; }
+    public String getLocation() { return location; }
+    public String getCourseName() { return courseName; }
     // 필요한 getter는 계속 추가하세요.
 
     public void confirm(String meetingCode) {

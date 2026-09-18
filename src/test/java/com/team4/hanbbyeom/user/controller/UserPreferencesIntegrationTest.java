@@ -106,7 +106,8 @@ class UserPreferencesIntegrationTest {
                 "한강 산책로 왕복",
                 360,
                 400,
-                now.plusHours(1)
+                now.plusHours(1),
+                now
         );
         // 확정된 매칭의 스냅샷 값도 사용자 기본 설정 변경과 분리되는지 확인하기 위해 확정 상태로 저장
         activityMatch.confirm("123456");
