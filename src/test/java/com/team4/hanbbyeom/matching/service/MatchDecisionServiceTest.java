@@ -234,10 +234,12 @@ class MatchDecisionServiceTest {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
         assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.ENDED);
 
-        // 게시글(MATCHED)은 그대로 둬야 한다 — 활동이 정상적으로 끝난 것뿐이라 SEARCHING으로
-        // 되돌릴 이유가 없다.
+        // 게시글은 CLOSED로 전이돼야 한다 — SEARCHING으로 되돌릴 이유는 없지만(활동이 정상
+        // 종료된 것뿐), MATCHED로 남겨두면 uq_match_request_active_user와 /requests/me 양쪽에서
+        // 계속 "활성" 게시글로 취급돼 새 게시글을 못 만들고 지나간 게시글이 계속 노출된다
+        // (팀원 리뷰로 발견).
         assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
-                .isEqualTo(MatchRequestStatus.MATCHED);
+                .isEqualTo(MatchRequestStatus.CLOSED);
 
         // 반면 두 참가자는 반드시 release()돼서 다른 매칭에 다시 참여할 수 있어야 한다
         // (이게 바로 팀원 리뷰로 발견된, released_at이 영원히 안 채워지던 문제).
@@ -284,6 +286,13 @@ class MatchDecisionServiceTest {
         assertThat(normal.getStatus()).isEqualTo(ActivityMatchStatus.ENDED);
         var normalParticipants = matchParticipantRepository.findByActivityMatchId(activityMatch2Id);
         assertThat(normalParticipants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+
+        // 정상 처리된 건의 호스트 게시글도 CLOSED로 전이돼야 한다(비정상 건 스킵과 무관하게).
+        Long host2RequestId = jdbcTemplate.queryForObject(
+                "SELECT match_request_id FROM match_participant WHERE activity_match_id = ? AND slot = 'A'",
+                Long.class, activityMatch2Id);
+        assertThat(matchRequestRepository.findById(host2RequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.CLOSED);
     }
 
     // 두 스케줄러 회귀 테스트가 공통으로 쓰는, @BeforeEach와 별개인 두 번째 PROPOSED 매칭 생성.

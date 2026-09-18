@@ -36,6 +36,7 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
                am.distance_max_meters AS distanceMaxMeters,
                am.scheduled_at AS scheduledAt,
                am.talk_level AS talkLevel,
+               host.match_request_id AS hostMatchRequestId,
                u.nickname AS hostNickname,
                tp.average_rating AS hostRating,
                tp.completed_activity_count AS hostCompletedCount
@@ -60,6 +61,7 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
         Integer getDistanceMaxMeters();
         Instant getScheduledAt();
         String getTalkLevel();
+        Long getHostMatchRequestId();
         String getHostNickname();
         Double getHostRating();
         Integer getHostCompletedCount();

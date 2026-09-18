@@ -72,6 +72,23 @@ class MatchingFlowIntegrationTest {
         );
     }
 
+    // makeDeadlineOverdue()와 같은 이유로, created_at부터 scheduled_end_at까지 네 시각을 전부
+    // DB 서버 시각 기준 실제 과거로 고정해서 "이미 지난 예정 종료 시각"을 확정적으로 만든다
+    // (MatchDecisionServiceTest.pushScheduledEndAtIntoThePast()와 동일한 패턴).
+    private void pushScheduledEndAtIntoThePast(Long activityMatchId) {
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '4 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '3 seconds',
+                    scheduled_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    scheduled_end_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
+    }
+
     private String bearerTokenOf(Long userId) {
         return "Bearer " + jwtTokenProvider.createAccessToken(userId);
     }
@@ -391,5 +408,59 @@ class MatchingFlowIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    // 회귀 테스트: 활동이 자연 종료(ENDED)돼도 호스트 게시글이 MATCHED로 남아 있으면
+    // uq_match_request_active_user 부분 유니크 인덱스와 GET /api/matching/requests/me 양쪽에서
+    // 계속 "활성" 게시글로 취급돼, 활동이 끝난 지 오래된 게시글이 /requests/me에 계속 노출되고
+    // 호스트가 새 게시글을 등록하지도 못했다(팀원 리뷰로 발견). endOverdueActivities()가
+    // 게시글을 CLOSED로 전이하도록 고친 뒤, 실제 HTTP 흐름으로 두 가지를 확인한다.
+    @Test
+    @DisplayName("활동 종료 후 모집글이 CLOSED로 전이되어 /requests/me에서 빠지고 새 모집글을 등록할 수 있다")
+    void 활동_종료_후_모집글이_CLOSED로_전이되고_새_모집글_등록이_가능하다() throws Exception {
+        Long hostUserId = createUser("호스트5");
+        Long applicantUserId = createUser("신청자5");
+        String hostToken = bearerTokenOf(hostUserId);
+        String applicantToken = bearerTokenOf(applicantUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/accept", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isOk());
+        // accept()가 남긴 변경(status=CONFIRMED 등)을 DB에 반영해둔다 — 안 그러면 바로 아래
+        // raw SQL 업데이트가 실행되는 시점에도 DB엔 아직 PROPOSED로 남아 있어서, endOverdueActivities()의
+        // findByStatusAndScheduledEndAtBefore(CONFIRMED, ...) 조회에 이 건이 안 걸린다.
+        entityManager.flush();
+
+        pushScheduledEndAtIntoThePast(activityMatchId);
+        entityManager.clear();
+        matchDecisionService.endOverdueActivities();
+
+        // 활동이 끝난 게시글은 더 이상 /requests/me에 나오면 안 된다(CLOSED로 전이됐으므로).
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isNotFound());
+
+        // 활성 게시글이 없어졌으니 같은 호스트가 새 게시글을 다시 등록할 수 있어야 한다
+        // (uq_match_request_active_user에 더 이상 걸리지 않아야 함).
+        mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞 (재등록)")))
+                .andExpect(status().isCreated());
     }
 }

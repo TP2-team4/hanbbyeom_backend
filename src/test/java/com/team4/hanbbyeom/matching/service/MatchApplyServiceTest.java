@@ -291,6 +291,15 @@ class MatchApplyServiceTest {
                         tuple(cancelledId, "CANCELLED")
                 );
 
+        // 회귀 테스트: 신청 취소(POST /api/matching/board/{requestId}/apply/cancel)에 필요한
+        // 건 activityMatchId가 아니라 호스트 게시글 id인데, 응답에 이게 빠져 있어서 새로고침 후
+        // 대기 중 신청을 취소할 방법이 없었다(팀원 리뷰로 발견). PENDING 건의 hostMatchRequestId가
+        // 실제로 취소 API가 받는 그 게시글 id(hostRequestId)와 일치하는지 확인한다.
+        assertThat(all)
+                .filteredOn(r -> r.activityMatchId().equals(pendingId))
+                .extracting(MyApplicationResponse::hostMatchRequestId)
+                .containsExactly(hostRequestId);
+
         assertThat(matchApplyService.getMyApplications(applicantUserId, "PENDING"))
                 .extracting(MyApplicationResponse::activityMatchId).containsExactly(pendingId);
         assertThat(matchApplyService.getMyApplications(applicantUserId, "REJECTED"))

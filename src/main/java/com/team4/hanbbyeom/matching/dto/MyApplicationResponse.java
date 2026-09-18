@@ -12,6 +12,12 @@ import java.time.OffsetDateTime;
 //   CANCELLED: 신청자 본인이 직접 취소한 경우(REJECTED, closedByUserId=신청자 본인)
 public record MyApplicationResponse(
         Long activityMatchId,
+        // 신청 취소(POST /api/matching/board/{requestId}/apply/cancel)의 경로 변수는
+        // activityMatchId가 아니라 호스트 게시글(match_request) id다. 이 필드가 없으면
+        // 신청 직후 응답으로 받은 hostRequestId를 프론트가 기억해뒀다가 넘겨야 하는데, 새로고침
+        // 등으로 그 값을 잃으면 이 목록 API로 다시 조회해도 취소를 호출할 방법이 없었다
+        // (팀원 리뷰로 발견).
+        Long hostMatchRequestId,
         String status, // "PENDING" | "ACCEPTED" | "REJECTED" | "CANCELLED"
         String courseName,
         Integer distanceMinMeters,

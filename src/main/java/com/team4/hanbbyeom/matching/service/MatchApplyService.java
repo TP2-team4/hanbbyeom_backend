@@ -220,6 +220,7 @@ public class MatchApplyService {
                                                            Long applicantUserId) {
         return new MyApplicationResponse(
                 row.getId(),
+                row.getHostMatchRequestId(),
                 toDisplayStatus(row.getStatus(), row.getClosedByUserId(), applicantUserId),
                 row.getCourseName(),
                 row.getDistanceMinMeters(),
