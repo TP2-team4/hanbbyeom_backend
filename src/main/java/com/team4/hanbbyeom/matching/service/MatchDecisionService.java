@@ -185,11 +185,15 @@ public class MatchDecisionService {
 
             activityMatch.end();
 
-            // 게시글 상태(MATCHED)는 건드리지 않는다 — 활동이 정상적으로 끝난 것뿐이라
-            // reject()/expireOverdue()처럼 SEARCHING으로 되돌릴 이유가 없다. 여기서 필요한 건
-            // 오직 "두 참가자를 다시 매칭 가능한 상태로 풀어주는" release()뿐이다.
+            // 게시글을 CLOSED로 전이한다 — reject()/expireOverdue()처럼 SEARCHING으로 되돌릴
+            // 이유는 없지만(활동이 정상적으로 끝난 것), MATCHED에 그대로 두면 안 된다. MATCHED는
+            // uq_match_request_active_user(부분 유니크 인덱스)와 /requests/me 양쪽에서 여전히
+            // "활성" 게시글로 취급돼서, 활동이 끝난 뒤에도 그 게시글이 /requests/me에 계속
+            // 노출되고 사용자가 새 게시글을 등록하지도 못하게 된다(팀원 리뷰로 발견). release()로
+            // 참가자 슬롯만 풀어주는 걸로는 이 문제를 못 막는다.
             host.get().release();
             applicant.get().release();
+            transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.CLOSED);
         }
     }
 
