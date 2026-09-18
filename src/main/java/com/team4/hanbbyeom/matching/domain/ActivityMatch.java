@@ -94,6 +94,7 @@ public class ActivityMatch {
     public OffsetDateTime getClosedAt() { return closedAt; }
     public Long getClosedByUserId() { return closedByUserId; }
     public OffsetDateTime getDecisionExpiresAt() { return decisionExpiresAt; }
+    public OffsetDateTime getScheduledEndAt() { return scheduledEndAt; }
     // 필요한 getter는 계속 추가하세요.
 
     public void confirm(String meetingCode) {
