@@ -217,6 +217,37 @@ class MatchApplyServiceTest {
                 .isCloseTo(now.plusHours(24), within(2, ChronoUnit.SECONDS));
     }
 
+    // 회귀 테스트: decisionExpiresAt이 scheduledAt-1h까지 내려올 수 있게 되면서(위 두 테스트),
+    // apply()가 가드에 쓴 now와 ActivityMatch가 실제로 저장하는 created_at이 서로 다른 시각이면
+    // (엔티티 생성자가 내부에서 OffsetDateTime.now()를 다시 호출했었음) 그 미세한 시간차만으로
+    // created_at < decision_expires_at DB 제약을 위반해 500이 날 수 있었다(팀원 리뷰로 발견한
+    // 회귀 — 기존 버그가 아니라 이 PR이 새로 들여온 문제). scheduledAt을 1시간을 살짝 넘는
+    // 정도로만 잡아서(등록 최소 리드타임 3시간은 여기서 검증 대상이 아니므로 서비스가 아니라
+    // 엔티티를 직접 저장해 우회) decisionExpiresAt이 now에 거의 붙는 가장 빡빡한 경우를
+    // 재현한다 — 지금은 ActivityMatch 생성자가 now를 다시 부르지 않고 apply()가 넘겨준 값을
+    // 그대로 쓰므로, 타이밍과 무관하게 항상 성공해야 한다.
+    @Test
+    void 응답_기한이_활동_시작_바로_1시간_전으로_바짝_붙어도_예외없이_성공한다() {
+        Long tightHostUserId = createUser("host-tightwindow");
+        OffsetDateTime scheduledAt = OffsetDateTime.now().plusHours(1).plusMinutes(2);
+        MatchRequest tightHostRequest = new MatchRequest(
+                tightHostUserId, scheduledAt, TalkLevel.LIGHT_CHAT, scheduledAt.minusMinutes(1)
+        );
+        Long tightHostRequestId = matchRequestRepository.save(tightHostRequest).getId();
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                tightHostRequestId, courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
+        );
+
+        Long activityMatchId = matchApplyService.apply(applicantUserId, tightHostRequestId);
+
+        assertThat(activityMatchId).isNotNull();
+    }
+
     // 화면(26 "내가 신청한 모집")의 탭 구성(전체/대기 중/수락됨/거절됨/취소함)에 맞춰, 같은
     // 신청자가 넣은 서로 다른 결과의 신청들이 각각 올바른 표시 상태로 매핑되는지, 그리고
     // status 필터가 정확히 그 건만 걸러내는지 확인한다.

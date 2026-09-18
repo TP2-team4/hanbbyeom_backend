@@ -100,11 +100,14 @@ public class MatchApplyService {
             throw new InvalidMatchRequestException("활동 시작 시각이 너무 임박해서 신청할 수 없어요.");
         }
 
-        // 4) activity_match 생성 (PROPOSED)
+        // 4) activity_match 생성 (PROPOSED) — createdAt에 위 가드에서 쓴 것과 정확히 같은 now를
+        // 넘긴다. ActivityMatch가 내부에서 OffsetDateTime.now()를 다시 호출하면 그 사이 시간차만큼
+        // created_at < decision_expires_at 제약을 위반할 여지가 생긴다(팀원 리뷰로 발견한 회귀 —
+        // ActivityMatch 생성자 주석 참고).
         ActivityMatch activityMatch = new ActivityMatch(
                 scheduledAt, scheduledEndAt, hostRequest.getTalkLevel(),
                 meetingPoint, courseName, distanceMinMeters, distanceMaxMeters, routeDescription,
-                paceMinSec, paceMaxSec, decisionExpiresAt
+                paceMinSec, paceMaxSec, decisionExpiresAt, now
         );
         Long activityMatchId = activityMatchRepository.save(activityMatch).getId();
 
