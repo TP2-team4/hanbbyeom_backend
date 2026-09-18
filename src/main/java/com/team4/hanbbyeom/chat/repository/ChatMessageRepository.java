@@ -7,7 +7,6 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 // 채팅 메시지 저장과 매칭별 시간순 조회 담당
 // 메시지 ID는 생성 순서대로 증가하므로 폴링 커서로도 사용
@@ -22,9 +21,6 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             Long activityMatchId,
             Long afterId
     );
-
-    // 채팅 목록에서 가장 최근 메시지 내용과 시각을 표시할 때 사용
-    Optional<ChatMessage> findTopByActivityMatchIdOrderByIdDesc(Long activityMatchId);
 
     // 채팅 목록 화면에 필요한 매칭 정보와 최근 메시지를 한 번의 쿼리로 조회
     // released_at 조건을 사용하지 않아 종료된 매칭도 남기고, 메시지가 없으면 confirmed_at을

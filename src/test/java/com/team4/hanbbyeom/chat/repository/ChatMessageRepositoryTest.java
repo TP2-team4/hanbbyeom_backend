@@ -18,7 +18,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 // 실제 PostgreSQL에서 chat_message의 저장 구조, 제약조건, 조회 순서를 확인
-// Service와 Controller는 다음 커밋에서 추가하므로 이번 테스트는 Repository와 DB 동작만 검증
 @SpringBootTest
 @Transactional
 class ChatMessageRepositoryTest {
@@ -96,20 +95,6 @@ class ChatMessageRepositoryTest {
         assertThat(messages)
                 .extracting(ChatMessage::getId)
                 .containsExactly(second.getId(), third.getId());
-    }
-
-    @Test
-    @DisplayName("채팅 목록에 표시할 가장 최근 메시지 1건 조회")
-    void 최근_메시지_조회() {
-        saveMessage(activityMatchId, senderId, "첫 번째 메시지");
-        ChatMessage latest = saveMessage(activityMatchId, senderId, "마지막 메시지");
-
-        ChatMessage found = chatMessageRepository
-                .findTopByActivityMatchIdOrderByIdDesc(activityMatchId)
-                .orElseThrow();
-
-        assertThat(found.getId()).isEqualTo(latest.getId());
-        assertThat(found.getContent()).isEqualTo("마지막 메시지");
     }
 
     @Test

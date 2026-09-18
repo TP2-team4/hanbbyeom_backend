@@ -26,7 +26,7 @@ public class ChatMessage {
     private Long activityMatchId;
 
     // 메시지를 보낸 사용자 ID
-    // 다음 단계의 Service에서 클라이언트 입력이 아닌 JWT 인증 사용자 ID를 사용
+    // 클라이언트 입력이 아닌 JWT 인증을 마친 사용자의 ID를 저장
     @Column(name = "sender_id", nullable = false)
     private Long senderId;
 
