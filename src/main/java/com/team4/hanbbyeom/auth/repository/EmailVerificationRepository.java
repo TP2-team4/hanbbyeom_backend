@@ -19,4 +19,8 @@ public interface EmailVerificationRepository extends JpaRepository<EmailVerifica
             String email,
             VerificationPurpose purpose
     );
+
+    // 회원 탈퇴 시 남아 있는 이메일 인증 기록을 정리하는 용도.
+    // DELETE FROM email_verifications WHERE email = :email
+    void deleteByEmail(String email);
 }

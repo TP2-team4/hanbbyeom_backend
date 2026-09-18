@@ -11,11 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 // 사용자 본인 정보 조회 및 기본 설정 변경 API
 @Tag(name = "User", description = "사용자 본인 정보 및 기본 설정 API")
@@ -75,5 +71,21 @@ public class UserController {
                 .updatePreferences(principal.getUserId(), request);
 
         return ResponseEntity.ok(response);
+    }
+
+    // 회원 탈퇴: POST /api/users/me/withdraw
+    // 요청/응답 바디 없음. 탈퇴 즉시 개인정보가 NULL로 지워지므로, 지금 쓰고 있는 access token으로
+    // 다음 요청부터는 401이 난다(findByIdAndDeletedAtIsNull이 JWT 인증 필터에서도 쓰이므로).
+    @Operation(
+            summary = "회원 탈퇴",
+            description = "인증된 사용자 본인 계정을 탈퇴 처리합니다. 이메일·비밀번호·닉네임·기본 대화 수준이 "
+                    + "모두 제거되며, 탈퇴 후에는 같은 이메일로 재가입할 수 있습니다. 되돌릴 수 없습니다."
+    )
+    @PostMapping("/me/withdraw")
+    public ResponseEntity<Void> withdraw(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        userService.withdraw(principal.getUserId());
+        return ResponseEntity.noContent().build();
     }
 }
