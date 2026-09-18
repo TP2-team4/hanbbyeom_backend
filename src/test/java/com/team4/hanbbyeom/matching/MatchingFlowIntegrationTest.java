@@ -190,6 +190,46 @@ class MatchingFlowIntegrationTest {
                 .andExpect(jsonPath("$.message").value("존재하지 않는 매칭이에요."));
     }
 
+    // 회귀 테스트: GET /api/matching/requests/me가 GET /api/matching/requests/{id}(Long)
+    // 패턴에 가려서 "me"를 id로 파싱하려다 400/500이 나지 않는지 확인한다(Spring이 리터럴
+    // 경로를 변수 패턴보다 우선하는 것에 기대는 부분이라 실제 HTTP 요청으로 고정해둔다).
+    // 프론트/QA가 방금 만든 게시글의 Location 헤더를 놓쳤을 때 id 없이도 확인할 수 있게
+    // 추가한 API.
+    @Test
+    @DisplayName("등록 직후 내 활성 모집글을 id 없이 /me로 조회할 수 있다")
+    void 내_활성_모집글을_me_경로로_조회할_수_있다() throws Exception {
+        Long hostUserId = createUser("호스트");
+        String hostToken = bearerTokenOf(hostUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(hostRequestId))
+                .andExpect(jsonPath("$.status").value("SEARCHING"));
+    }
+
+    // 활성 모집글이 아예 없는 유저가 조회하면 404여야 한다(존재하지 않는 id로 조회할 때와
+    // 동일한 예외 타입을 쓰지만, "id=X" 대신 "활성 모집글이 없다"는 메시지를 내려준다).
+    @Test
+    @DisplayName("활성 모집글이 없으면 /me 조회 시 404가 반환된다")
+    void 활성_모집글이_없으면_me_조회시_404를_반환한다() throws Exception {
+        Long userId = createUser("모집글없는사용자");
+
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(userId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("현재 진행 중인 모집글이 없어요."));
+    }
+
     @Test
     @DisplayName("호스트가 거절하면 게시글이 다시 모집 탭에 노출된다")
     void 거절하면_게시글이_다시_노출된다() throws Exception {
