@@ -2,8 +2,13 @@ package com.team4.hanbbyeom.feedback.repository;
 
 import com.team4.hanbbyeom.feedback.domain.ActivityReview;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
+import com.team4.hanbbyeom.matching.domain.AcceptStatus;
+import com.team4.hanbbyeom.matching.domain.MatchParticipant;
+import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +32,12 @@ public class ActivityReviewRepositoryTest {
     private ActivityMatchRepository activityMatchRepository;
 
     @Autowired
+    private MatchRequestRepository matchRequestRepository;
+
+    @Autowired
+    private MatchParticipantRepository matchParticipantRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     private Long reviewerUserId;
@@ -38,9 +49,6 @@ public class ActivityReviewRepositoryTest {
         reviewerUserId = insertTestUser("reviewer");
         revieweeUserId = insertTestUser("reviewee");
 
-        // activity_match의 chk_activity_match_time 제약: created_at(=지금) < decision_expires_at
-        // < scheduled_at < scheduled_end_at 순서를 반드시 지켜야 해서, 전부 "지금보다 미래" 값으로 넣음
-        // (우리 목적은 "매칭이 실제로 끝났는지"가 아니라 FK가 가리킬 유효한 행 하나 만드는 것뿐이라 상관없음)
         ActivityMatch savedMatch = activityMatchRepository.save(
                 new ActivityMatch(
                         OffsetDateTime.now().plusMinutes(20),
@@ -58,10 +66,25 @@ public class ActivityReviewRepositoryTest {
                 )
         );
         activityMatchId = savedMatch.getId();
+
+        // fk_activity_review_reviewer_participant / reviewee_participant 제약을 만족시키려면
+        // 두 사용자가 이 매칭의 실제 match_participant여야 함. match_participant는 다시
+        // match_request(id, user_id) 복합 FK가 있어서, 각자 본인 소유의 match_request부터 만든다.
+        Long reviewerRequestId = matchRequestRepository.save(
+                new MatchRequest(reviewerUserId, OffsetDateTime.now().plusMinutes(20),
+                        TalkLevel.SILENT, OffsetDateTime.now().plusMinutes(15))
+        ).getId();
+        Long revieweeRequestId = matchRequestRepository.save(
+                new MatchRequest(revieweeUserId, OffsetDateTime.now().plusMinutes(20),
+                        TalkLevel.SILENT, OffsetDateTime.now().plusMinutes(15))
+        ).getId();
+
+        matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, reviewerRequestId, reviewerUserId, "A", AcceptStatus.ACCEPTED));
+        matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, revieweeRequestId, revieweeUserId, "B", AcceptStatus.ACCEPTED));
     }
 
-    // users 테이블 CHECK 제약(chk_users_account_lifecycle) 때문에 필수 필드를 다 채워서 넣음
-    // — RunMatchConditionRepositoryTest의 setUp()과 동일한 패턴
     private Long insertTestUser(String label) {
         return jdbcTemplate.queryForObject(
                 """
