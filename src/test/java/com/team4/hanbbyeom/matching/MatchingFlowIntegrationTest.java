@@ -55,6 +55,23 @@ class MatchingFlowIntegrationTest {
         );
     }
 
+    // created_at과 decision_expires_at을 DB 서버 시각(CURRENT_TIMESTAMP) 기준으로 함께
+    // 과거로 밀어서 chk_activity_match_time 제약을 지키면서 "이미 지난 기한"을 확정적으로
+    // 만든다. 원래는 decision_expires_at만 created_at + 1ms로 세팅했는데, 테스트가 그 1ms가
+    // 지나기 전에 다음 단계까지 도달할 만큼 빠르게 실행되면 간헐적으로 실패했다
+    // (MatchDecisionServiceTest와 동일한 문제 — 팀원 리뷰로 발견).
+    private void makeDeadlineOverdue(Long activityMatchId) {
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
+    }
+
     private String bearerTokenOf(Long userId) {
         return "Bearer " + jwtTokenProvider.createAccessToken(userId);
     }
@@ -300,15 +317,7 @@ class MatchingFlowIntegrationTest {
                 .andReturn();
         Long activityMatchId = idFromLocationHeader(applyResult);
 
-        // 응답 기한을 created_at 직후로 고정 — chk_activity_match_time 제약(created_at <
-        // decision_expires_at)은 지키면서 확정적으로 "이미 지난 기한"을 만든다
-        // (MatchDecisionServiceTest.pastDeadlineFor()와 동일한 이유).
-        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
-                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
-        jdbcTemplate.update(
-                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                createdAt.plusNanos(1_000_000), activityMatchId
-        );
+        makeDeadlineOverdue(activityMatchId);
         // raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, apply()가 이미 로드해둔
         // ActivityMatch 1차 캐시를 비워야 expireOverdue()가 DB의 최신 값을 다시 읽는다.
         entityManager.clear();
