@@ -21,7 +21,13 @@ import java.time.OffsetDateTime;
 @Service
 public class MatchRequestCommandService {
 
-    private static final long MIN_LEAD_HOURS = 3;
+    // 신청(MatchApplyService.apply())은 호스트에게 DECISION_WINDOW_HOURS(24시간)의 응답 시간을
+    // 보장해야 해서, 신청 시점 기준 scheduledAt이 그보다 더 뒤여야만 성공한다. 게시글 등록 시
+    // 최소 리드타임을 그보다 짧게(예전엔 3시간) 잡으면, 등록 직후엔 아무도 신청할 수 없는
+    // "3~24시간 뒤 일정" 글이 만들어지는 모순이 생긴다(팀원 리뷰로 발견). 그래서 등록 최소
+    // 리드타임을 DECISION_WINDOW_HOURS보다 1시간 더 여유 있게 잡아서, 등록 직후에도 최소
+    // 1시간의 유효한 신청 가능 구간이 항상 남아 있도록 보장한다.
+    private static final long MIN_LEAD_HOURS = MatchApplyService.DECISION_WINDOW_HOURS + 1;
     private static final long SEARCH_WINDOW_HOURS = 1;
 
     private final MatchRequestRepository matchRequestRepository;
@@ -102,9 +108,11 @@ public class MatchRequestCommandService {
         return matchRequest;
     }
 
-    // create()/update() 공용 — 활동 시작 시각이 너무 임박하면 (scheduledAt - 1시간으로 계산되는)
-    // searchExpiresAt이 created_at보다 앞서버려 DB 제약(chk_match_request_time)을 위반하게 되므로,
-    // 저장 전에 미리 걸러서 500 대신 400으로 응답한다.
+    // create()/update() 공용 — 활동 시작 시각이 너무 임박하면 (1) (scheduledAt - 1시간으로
+    // 계산되는) searchExpiresAt이 created_at보다 앞서버려 DB 제약(chk_match_request_time)을
+    // 위반하고, (2) MIN_LEAD_HOURS가 DECISION_WINDOW_HOURS보다 크게 잡혀 있지 않으면 등록은
+    // 되지만 아무도 신청 못 하는 글이 생기므로, 저장 전에 미리 걸러서 500/모순된 상태 대신
+    // 400으로 응답한다.
     private void validateScheduledAt(OffsetDateTime scheduledAt) {
         OffsetDateTime minAllowed = OffsetDateTime.now().plusHours(MIN_LEAD_HOURS);
         if (scheduledAt.isBefore(minAllowed)) {

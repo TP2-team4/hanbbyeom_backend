@@ -13,7 +13,10 @@ import java.util.Map;
 @Service
 public class MatchApplyService {
 
-    private static final long DECISION_WINDOW_HOURS = 24; // 호스트 응답 대기 기한
+    // 호스트 응답 대기 기한. MatchRequestCommandService.MIN_LEAD_HOURS가 이 값보다 커야
+    // "등록은 됐는데 아무도 신청할 수 없는 글"이 생기지 않으므로(팀원 리뷰로 발견), 패키지
+    // 밖에서 못 보게 private으로 감싸지 않고 그대로 참조해서 두 값이 다시 어긋나지 않게 한다.
+    static final long DECISION_WINDOW_HOURS = 24;
     private static final long ACTIVITY_DURATION_HOURS = 2; // scheduled_end_at 계산용 고정 버퍼 (프론트 미노출, 종료 배치 내부용)
 
     private final MatchRequestRepository matchRequestRepository;
