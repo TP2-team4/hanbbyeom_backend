@@ -153,7 +153,7 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         JOIN run_match_condition rc ON rc.match_request_id = mr.id
         JOIN running_course co ON co.id = rc.course_id
         WHERE mr.user_id = :userId
-        ORDER BY mr.created_at DESC
+        ORDER BY mr.created_at DESC, mr.id DESC
         """, nativeQuery = true)
     List<MyPostRow> findMyPosts(@Param("userId") Long userId);
 
