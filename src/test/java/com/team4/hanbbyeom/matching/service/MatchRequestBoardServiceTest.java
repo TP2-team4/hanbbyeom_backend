@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -18,8 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.List;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest
 @Transactional
@@ -162,5 +162,52 @@ class MatchRequestBoardServiceTest {
     void 대기중인_신청이_없으면_예외가_발생한다() {
         assertThatThrownBy(() -> matchRequestBoardService.getPendingApplication(testUserId, testMatchRequestId))
                 .isInstanceOf(PendingApplicationNotFoundException.class);
+    }
+
+    @Test
+    void 내_모집글_목록을_조회하면_상태와_무관하게_전부_반환된다() {
+        // uq_match_request_active_user는 활성 상태(SEARCHING/PENDING_CONFIRMATION/MATCHED)인
+        // 게시글을 유저당 1개만 허용한다. testUserId는 이미 SEARCHING 게시글을 갖고 있으므로,
+        // 두 번째 게시글을 엔티티(기본 상태=SEARCHING)로 만들면 곧바로 제약을 위반한다. 그래서
+        // raw SQL로 처음부터 비활성 상태(CANCELLED)로 INSERT한다.
+        Long secondRequestId = jdbcTemplate.queryForObject(
+                """
+                INSERT INTO match_request (user_id, scheduled_at, talk_level, status, search_expires_at)
+                VALUES (?, ?, ?, 'CANCELLED', ?)
+                RETURNING id
+                """,
+                Long.class,
+                testUserId, OffsetDateTime.now().plusHours(72), "SILENT", OffsetDateTime.now().plusHours(24)
+        );
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                secondRequestId, testCourseId, "여의도 한강공원", 3000, 6000, 300, 350
+        );
+
+        List<MyPostResponse> myPosts = matchRequestBoardService.getMyPosts(testUserId);
+
+        assertThat(myPosts)
+                .extracting(MyPostResponse::id, MyPostResponse::status)
+                .containsExactlyInAnyOrder(
+                        tuple(testMatchRequestId, "SEARCHING"),
+                        tuple(secondRequestId, "CANCELLED")
+                );
+    }
+
+    @Test
+    void 다른_사람이_등록한_모집글은_내_목록에_나오지_않는다() {
+        Long otherUserId = jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
+                Long.class,
+                "other-" + System.nanoTime() + "@example.com", "dummy-hash", "다른사람", OffsetDateTime.now()
+        );
+
+        List<MyPostResponse> myPosts = matchRequestBoardService.getMyPosts(otherUserId);
+
+        assertThat(myPosts).isEmpty();
     }
 }
