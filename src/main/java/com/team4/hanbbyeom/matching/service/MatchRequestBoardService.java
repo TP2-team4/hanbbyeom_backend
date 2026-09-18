@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.matching.service;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MyPostResponse;
@@ -23,6 +24,11 @@ import java.util.stream.Collectors;
 
 @Service
 public class MatchRequestBoardService {
+
+    // getMyActiveRequest()에서 쓰는 "활성" 상태 집합 — uq_match_request_active_user
+    // 부분 유니크 인덱스와 동일하게 맞춰야 한다.
+    private static final List<MatchRequestStatus> ACTIVE_STATUSES =
+            List.of(MatchRequestStatus.SEARCHING, MatchRequestStatus.PENDING_CONFIRMATION, MatchRequestStatus.MATCHED);
 
     private final MatchRequestRepository matchRequestRepository;
     private final MatchParticipantRepository matchParticipantRepository;
@@ -144,6 +150,15 @@ public class MatchRequestBoardService {
                 pendingApplicantCount,
                 new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
         );
+    }
+
+    // 내가 지금 갖고 있는 활성 모집글/신청 1건 조회(GET /api/matching/requests/me) — Postman/QA
+    // 등에서 방금 등록한 게시글의 id를 몰라도(Location 헤더를 놓쳤어도) 확인할 수 있게 하고,
+    // 프론트도 "지금 내가 모집 중인 글이 있는지"를 id 없이 바로 물어볼 수 있게 한다.
+    public MatchRequestResponse getMyActiveRequest(Long userId) {
+        MatchRequest matchRequest = matchRequestRepository.findByUserIdAndStatusIn(userId, ACTIVE_STATUSES)
+                .orElseThrow(() -> new MatchRequestNotFoundException("현재 진행 중인 모집글이 없어요."));
+        return getDetail(matchRequest.getId(), userId);
     }
 
     // 호스트 본인 게시글(matchRequestId)에 온 대기 중인 신청 1건 조회

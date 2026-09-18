@@ -70,15 +70,24 @@ class MatchDecisionServiceTest {
         );
     }
 
-    // created_at 바로 다음 순간(1ms 뒤)을 응답 기한으로 세팅한다 — chk_activity_match_time
-    // 제약(created_at < decision_expires_at)은 통과하면서, DB에 이미 기록된 created_at을
-    // 기준으로 삼으므로 Thread.sleep 없이도 "이미 지난 기한"임이 결정적으로 보장된다
-    // (이 메서드 호출 이후로도 락 조회·엔티티 재조회 등 여러 DB 왕복을 더 거친 뒤에야
-    // 실제 검증이 일어나므로, 그 시점의 실제 시각은 항상 이 값보다 뒤다).
-    private OffsetDateTime pastDeadlineFor(Long activityMatchId) {
-        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
-                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
-        return createdAt.plusNanos(1_000_000);
+    // created_at과 decision_expires_at을 DB 서버 시각(CURRENT_TIMESTAMP) 기준으로 함께
+    // 과거로 밀어서, chk_activity_match_time 제약(created_at < decision_expires_at <
+    // scheduled_at)을 지키면서도 "이미 지난 기한"을 확정적으로 만든다.
+    // 원래는 decision_expires_at만 created_at + 1ms로 세팅했는데, 그 1ms가 지나기 전에
+    // 다음 단계(서비스 호출)까지 도달할 만큼 테스트가 빠르게 실행되면 아직 "미래"로
+    // 판정되어 간헐적으로 실패했다(팀원 리뷰로 발견 — 전체 실행 2건, 클래스 단독 실행
+    // 4건 실패). CURRENT_TIMESTAMP - INTERVAL로 두 값 다 실제 과거 시각에 고정하면
+    // 테스트 실행 속도와 무관하게 항상 "지난 기한"이 된다.
+    private void makeDeadlineOverdue(Long activityMatchId) {
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
     }
 
     @Test
@@ -133,10 +142,7 @@ class MatchDecisionServiceTest {
     void 응답_기한이_지나면_수락할_수_없다() {
         // 상태는 여전히 PROPOSED지만(스케줄러가 아직 안 돈 상황을 흉내냄) decisionExpiresAt만
         // 이미 지난 상태를 만든다.
-        jdbcTemplate.update(
-                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                pastDeadlineFor(activityMatchId), activityMatchId
-        );
+        makeDeadlineOverdue(activityMatchId);
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
@@ -149,10 +155,7 @@ class MatchDecisionServiceTest {
 
     @Test
     void 응답_기한이_지나면_거절할_수_없다() {
-        jdbcTemplate.update(
-                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                pastDeadlineFor(activityMatchId), activityMatchId
-        );
+        makeDeadlineOverdue(activityMatchId);
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
@@ -165,12 +168,7 @@ class MatchDecisionServiceTest {
 
     @Test
     void 응답_기한이_지난_매칭은_자동으로_EXPIRED_처리된다() {
-        // created_at 바로 다음 순간으로 응답 기한을 당겨서 "이미 지난 기한"을 만든다
-        // (진짜 과거로 세팅하면 created_at보다도 앞서게 돼서 chk_activity_match_time 제약에 걸림).
-        jdbcTemplate.update(
-                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                pastDeadlineFor(activityMatchId), activityMatchId
-        );
+        makeDeadlineOverdue(activityMatchId);
         // 위 raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, @BeforeEach의 apply()가
         // 이미 로드해둔 ActivityMatch 1차 캐시가 갱신 안 된 채로 남는다. clear()로 캐시를
         // 비워야 이후 findById()가 DB의 최신 값을 다시 읽어온다(실제 운영에서는 apply()와
@@ -202,10 +200,8 @@ class MatchDecisionServiceTest {
     void 자동만료_배치_중_한_건의_참가자_데이터가_비정상이어도_다른_정상_건은_처리된다() {
         Long activityMatch2Id = createSecondOverdueProposedMatch();
 
-        jdbcTemplate.update("UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                pastDeadlineFor(activityMatchId), activityMatchId);
-        jdbcTemplate.update("UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                pastDeadlineFor(activityMatch2Id), activityMatch2Id);
+        makeDeadlineOverdue(activityMatchId);
+        makeDeadlineOverdue(activityMatch2Id);
 
         // 첫 번째 건(activityMatchId)의 신청자(slot B) 참가자 행을 강제로 지워 데이터 이상을 재현
         jdbcTemplate.update(
@@ -230,21 +226,7 @@ class MatchDecisionServiceTest {
         // entityManager.clear()가 아직 flush 안 된 이 변경을 DB 반영 전에 그냥 버려버린다.
         entityManager.flush();
 
-        // created_at 기준으로 아주 가까운 미래(수 ms 뒤)로 decision_expires_at/scheduled_at/
-        // scheduled_end_at을 한꺼번에 당겨서 순서 제약(created_at < decision_expires_at <
-        // scheduled_at < scheduled_end_at)은 지키면서, 실행 시점엔 이미 다 지난 시각으로 만든다
-        // (pastDeadlineFor()와 동일한 이유 — Thread.sleep 없이 결정적으로 재현).
-        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
-                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
-        jdbcTemplate.update(
-                """
-                UPDATE activity_match
-                SET decision_expires_at = ?, scheduled_at = ?, scheduled_end_at = ?
-                WHERE id = ?
-                """,
-                createdAt.plusNanos(1_000_000), createdAt.plusNanos(2_000_000),
-                createdAt.plusNanos(3_000_000), activityMatchId
-        );
+        pushScheduledEndAtIntoThePast(activityMatchId);
         entityManager.clear();
 
         matchDecisionService.endOverdueActivities();
@@ -252,10 +234,12 @@ class MatchDecisionServiceTest {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
         assertThat(activityMatch.getStatus()).isEqualTo(ActivityMatchStatus.ENDED);
 
-        // 게시글(MATCHED)은 그대로 둬야 한다 — 활동이 정상적으로 끝난 것뿐이라 SEARCHING으로
-        // 되돌릴 이유가 없다.
+        // 게시글은 CLOSED로 전이돼야 한다 — SEARCHING으로 되돌릴 이유는 없지만(활동이 정상
+        // 종료된 것뿐), MATCHED로 남겨두면 uq_match_request_active_user와 /requests/me 양쪽에서
+        // 계속 "활성" 게시글로 취급돼 새 게시글을 못 만들고 지나간 게시글이 계속 노출된다
+        // (팀원 리뷰로 발견).
         assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
-                .isEqualTo(MatchRequestStatus.MATCHED);
+                .isEqualTo(MatchRequestStatus.CLOSED);
 
         // 반면 두 참가자는 반드시 release()돼서 다른 매칭에 다시 참여할 수 있어야 한다
         // (이게 바로 팀원 리뷰로 발견된, released_at이 영원히 안 채워지던 문제).
@@ -302,6 +286,13 @@ class MatchDecisionServiceTest {
         assertThat(normal.getStatus()).isEqualTo(ActivityMatchStatus.ENDED);
         var normalParticipants = matchParticipantRepository.findByActivityMatchId(activityMatch2Id);
         assertThat(normalParticipants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+
+        // 정상 처리된 건의 호스트 게시글도 CLOSED로 전이돼야 한다(비정상 건 스킵과 무관하게).
+        Long host2RequestId = jdbcTemplate.queryForObject(
+                "SELECT match_request_id FROM match_participant WHERE activity_match_id = ? AND slot = 'A'",
+                Long.class, activityMatch2Id);
+        assertThat(matchRequestRepository.findById(host2RequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.CLOSED);
     }
 
     // 두 스케줄러 회귀 테스트가 공통으로 쓰는, @BeforeEach와 별개인 두 번째 PROPOSED 매칭 생성.
@@ -330,19 +321,21 @@ class MatchDecisionServiceTest {
         return matchApplyService.apply(applicant2UserId, host2RequestId);
     }
 
-    // 확정 매칭 하나를 골라 created_at 기준 아주 가까운 미래로 세 시각을 한꺼번에 당겨서
-    // (순서 제약은 지키되) 실행 시점엔 이미 다 지난 것으로 만든다 — 확정_매칭은_ENDED로_전이 테스트와 동일한 패턴.
+    // makeDeadlineOverdue()와 동일한 이유(팀원 리뷰로 발견) — created_at까지 포함한 네 시각을
+    // 전부 DB 서버 시각(CURRENT_TIMESTAMP) 기준 실제 과거로 고정해서, created_at <
+    // decision_expires_at < scheduled_at < scheduled_end_at 순서 제약은 지키면서도 테스트
+    // 실행 속도와 무관하게 항상 "이미 지난 예정 종료 시각"이 되도록 한다.
     private void pushScheduledEndAtIntoThePast(Long activityMatchId) {
-        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
-                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
         jdbcTemplate.update(
                 """
                 UPDATE activity_match
-                SET decision_expires_at = ?, scheduled_at = ?, scheduled_end_at = ?
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '4 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '3 seconds',
+                    scheduled_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    scheduled_end_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
                 WHERE id = ?
                 """,
-                createdAt.plusNanos(1_000_000), createdAt.plusNanos(2_000_000),
-                createdAt.plusNanos(3_000_000), activityMatchId
+                activityMatchId
         );
     }
 }

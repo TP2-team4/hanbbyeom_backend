@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching.repository;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,8 +9,14 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long> {
+
+    // 내 활성 모집글/신청 조회(GET /api/matching/requests/me)용 — uq_match_request_active_user
+    // 부분 유니크 인덱스와 동일한 상태 집합(SEARCHING/PENDING_CONFIRMATION/MATCHED)이라
+    // 이 유저에게 활성 행이 있다면 정확히 0건 또는 1건만 나온다.
+    Optional<MatchRequest> findByUserIdAndStatusIn(Long userId, List<MatchRequestStatus> statuses);
 
     // 모집 탭 목록(GET /api/matching/board) 조회용 쿼리.
     // match_request 하나당 코스명/거리/페이스(run_match_condition, running_course)와 작성자
