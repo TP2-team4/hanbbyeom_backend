@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.global.exception;
 
+import com.team4.hanbbyeom.chat.exception.ChatUnavailableException;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 // 모든 Controller에서 발생하는 예외를 ErrorResponse 형식으로 통일해서 응답
 // 전제조건: SecurityConfig에서 /error 경로를 permitAll로 열어둬야 함
@@ -26,7 +28,7 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory
             .getLogger(GlobalExceptionHandler.class);
 
-    // 1. 요청 DTO 검증 실패 처리
+    // COMMON: 요청 DTO 검증 실패 처리
     // 검증 실패 시, 발생한 필드 오류 중 첫 번째 메시지를 응답으로 사용
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(
@@ -45,16 +47,16 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(message)); // HTTP Response Body 설정: 오류 메시지 든 ErrorResponse 객체 생성
     }
 
-    // 2. 요청 본문의 DTO 변환 실패 처리
-    // JSON 형식 오류나 Enum에 정의되지 않은 값처럼 요청 본문을 DTO로 변환할 수 없는 경우에 해당
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException e) {
+    // COMMON: 요청 값의 형식 변환 실패 처리
+    // 잘못된 JSON·Enum 값 또는 숫자 자리에 문자열을 보낸 경로·쿼리 파라미터에 해당
+    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<ErrorResponse> handleRequestConversionFailure(Exception e) {
         return ResponseEntity
                 .badRequest()
                 .body(new ErrorResponse("요청 형식이 올바르지 않습니다."));
     }
 
-    // 3. 비즈니스 상태 규칙 위반 처리
+    // COMMON: 비즈니스 상태 규칙 위반 처리
     // 현재 상태에서 요청 수행 불가할 때 던지는 예외(재발송 대기, 만료, 시도 초과, 코드 불일치 등)
     // e.getMessage()를 그대로 노출하는 이유: 우리 Service 코드가 사용자에게 보여줄 목적으로 작성한 문구라서 안전
     @ExceptionHandler(IllegalStateException.class)
@@ -66,17 +68,17 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage())); // Service가 던진 메시지를 그대로 응답 body에 담음
     }
 
-    // 4. 잘못된 메서드 인자 처리
+    // COMMON: 잘못된 메서드 인자 처리
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(
             IllegalArgumentException e // IllegalArgumentException: 넘겨준 값 자체가 잘못됨
     ) {
         return ResponseEntity
                 .badRequest() // HTTP 상태코드를 400 Bad Request로 설정
-                .body(new ErrorResponse(e.getMessage())); // 3번과 동일한 이유로 e.getMessage()를 그대로 노출
+                .body(new ErrorResponse(e.getMessage())); // 의도한 비즈니스 예외이므로 Service 메시지를 그대로 응답
     }
 
-    // 5. 매칭 요청 값 검증 실패 처리
+    // MATCHING: 매칭 요청 값 검증 실패 처리
     @ExceptionHandler(InvalidMatchRequestException.class)
     public ResponseEntity<ErrorResponse> handleInvalidMatchRequest(InvalidMatchRequestException e) {
         return ResponseEntity
@@ -84,7 +86,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 6. 활성 매칭 요청 중복 생성 처리
+    // MATCHING: 활성 매칭 요청 중복 생성 처리
     @ExceptionHandler(AlreadyHasActiveMatchRequestException.class)
     public ResponseEntity<ErrorResponse> handleAlreadyHasActiveMatchRequest(AlreadyHasActiveMatchRequestException e) {
         return ResponseEntity
@@ -92,7 +94,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 7. 매칭 요청 미존재 처리
+    // MATCHING: 매칭 요청 미존재 처리
     @ExceptionHandler(MatchRequestNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleMatchRequestNotFound(MatchRequestNotFoundException e) {
         return ResponseEntity
@@ -100,7 +102,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 8. 검색 중이 아닌 매칭 요청 처리
+    // MATCHING: 검색 중이 아닌 매칭 요청 처리
     @ExceptionHandler(MatchRequestNotSearchingException.class)
     public ResponseEntity<ErrorResponse> handleMatchRequestNotSearching(MatchRequestNotSearchingException e) {
         return ResponseEntity
@@ -108,7 +110,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 9. 매칭 참가자 권한 없음 처리
+    // MATCHING: 매칭 참가자 권한 없음 처리
     @ExceptionHandler(NotMatchParticipantException.class)
     public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
         return ResponseEntity
@@ -116,8 +118,8 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 10. 응답 대기 중인 신청 미존재 처리
-    // 권한 문제가 아니라 리소스 미존재이므로 위 9번(403)과 분리해서 404로 응답
+    // MATCHING: 응답 대기 중인 신청 미존재 처리
+    // 권한 문제가 아니라 리소스 미존재이므로 매칭 참가자 권한 없음(403)과 분리해서 404로 응답
     @ExceptionHandler(PendingApplicationNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePendingApplicationNotFound(PendingApplicationNotFoundException e) {
         return ResponseEntity
@@ -125,8 +127,9 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 11. activityMatchId로 조회했는데 매칭 자체가 존재하지 않을 때 — 9번(403, "존재는 하지만
-    // 본인과 무관함")과 구분해서 404로 응답한다. 원래 이 케이스도 NotMatchParticipantException
+    // MATCHING: activityMatchId에 해당하는 매칭 미존재 처리
+    // 존재하지만 본인과 무관한 매칭의 403 응답과 구분해서 404로 응답한다.
+    // 원래 이 케이스도 NotMatchParticipantException
     // (403)으로 던지면서 메시지만 "존재하지 않는 매칭이에요"라고 되어 있어 상태 코드와 메시지가
     // 어긋나 있었다(PR #57 리뷰 피드백으로 발견).
     @ExceptionHandler(ActivityMatchNotFoundException.class)
@@ -134,7 +137,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
-    // 12. 로그인 인증 실패 처리
+    // CHAT: 채팅 이용 불가 상태 처리
+    // 매칭이 아직 확정되지 않았거나 현재 상태·전송 가능 시간이 메시지 전송을 허용하지 않는 경우에 해당
+    @ExceptionHandler(ChatUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleChatUnavailable(ChatUnavailableException e) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // AUTH: 로그인 인증 실패 처리
     // AuthenticationManager는 "사용자 없음"도 BadCredentialsException으로 바꿔서 던짐
     // → 두 경우가 애초에 같은 예외로 도착하고, 여기서 고정 문구를 쓰므로 응답도 완전히 동일
     //   이 핸들러가 없으면 최종 핸들러로 떨어져 500이 나감
@@ -148,7 +160,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("이메일 또는 비밀번호가 올바르지 않습니다."));
     }
 
-    // 13. 리소스 접근 권한 없음 처리
+    // SECURITY: 인증 후 리소스 접근 권한 없음 처리
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity
@@ -156,11 +168,11 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 14. 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
+    // RUN: 존재하지 않는 러닝 조건(Run 도메인) 조회/수정/삭제 시도
     // 원래 RunExceptionHandler(별도 @RestControllerAdvice)에 있었으나, 서로 다른
     // @RestControllerAdvice로 나뉘면 Spring이 먼저 평가되는 Advice 빈에서 매칭되는
     // 핸들러를 찾는 순간 멈춰버려서, catch-all이 있는 이 클래스가 먼저 평가될 경우
-    // 이 핸들러까지 도달하지 못하고 15번 catch-all(500)로 빠지는 문제가 있었음
+    // 이 핸들러까지 도달하지 못하고 마지막 catch-all(500)로 빠지는 문제가 있었음
     // → 모든 구체적인 핸들러를 이 클래스 하나에 모아서 그런 순서 의존성을 없앤다
     @ExceptionHandler(RunMatchConditionNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
@@ -169,9 +181,9 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
-    // 15. 예상하지 못한 예외 처리
+    // COMMON: 예상하지 못한 예외 처리
     // 위 핸들러들 중 어디에도 안 걸리는 모든 예외가 마지막으로 여기서 잡힘
-    // 3·4번과 달리 e.getMessage()를 응답에 넣지 않는 이유
+    // 의도해서 던진 비즈니스 예외와 달리 e.getMessage()를 응답에 넣지 않는 이유
     // → 이런 예외는 우리가 의도해서 던진 게 아니라서 메시지 안에 내부 구현이 그대로 담겨 있을 수 있음
     // → 그 내용을 클라이언트에 그대로 보여주면 정보 노출 위험이 있어 고정된 안전한 문구만 반환
     @ExceptionHandler(Exception.class)

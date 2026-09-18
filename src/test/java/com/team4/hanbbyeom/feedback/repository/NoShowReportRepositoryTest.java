@@ -3,8 +3,13 @@ package com.team4.hanbbyeom.feedback.repository;
 import com.team4.hanbbyeom.feedback.domain.NoShowReason;
 import com.team4.hanbbyeom.feedback.domain.NoShowReport;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
+import com.team4.hanbbyeom.matching.domain.AcceptStatus;
+import com.team4.hanbbyeom.matching.domain.MatchParticipant;
+import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +31,12 @@ public class NoShowReportRepositoryTest {
 
     @Autowired
     private ActivityMatchRepository activityMatchRepository;
+
+    @Autowired
+    private MatchRequestRepository matchRequestRepository;
+
+    @Autowired
+    private MatchParticipantRepository matchParticipantRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -51,10 +62,25 @@ public class NoShowReportRepositoryTest {
                         "뚝섬유원지역 3번 출구",
                         360,
                         400,
-                        OffsetDateTime.now().plusMinutes(10)
+                        OffsetDateTime.now().plusMinutes(10),
+                        OffsetDateTime.now()
                 )
         );
         activityMatchId = savedMatch.getId();
+
+        Long reporterRequestId = matchRequestRepository.save(
+                new MatchRequest(reporterUserId, OffsetDateTime.now().plusMinutes(20),
+                        TalkLevel.SILENT, OffsetDateTime.now().plusMinutes(15))
+        ).getId();
+        Long reportedRequestId = matchRequestRepository.save(
+                new MatchRequest(reportedUserId, OffsetDateTime.now().plusMinutes(20),
+                        TalkLevel.SILENT, OffsetDateTime.now().plusMinutes(15))
+        ).getId();
+
+        matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, reporterRequestId, reporterUserId, "A", AcceptStatus.ACCEPTED));
+        matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, reportedRequestId, reportedUserId, "B", AcceptStatus.ACCEPTED));
     }
 
     private Long insertTestUser(String label) {
