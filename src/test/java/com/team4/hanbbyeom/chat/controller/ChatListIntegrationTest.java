@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.chat.controller;
 
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,7 +35,8 @@ class ChatListIntegrationTest {
     private JwtTokenProvider jwtTokenProvider;
 
     @Test
-    void 채팅_목록을_최근_메시지_시각_순으로_조회하고_메시지_없는_매칭도_포함한다() throws Exception {
+    @DisplayName("채팅 목록을 최근 메시지 시각 순으로 조회하고 메시지 없는 매칭도 포함")
+    void 채팅_목록_최신순_조회() throws Exception {
         Long currentUserId = createUser("현재사용자");
         Long endedCounterpartId = createUser("종료매칭상대");
         Long currentCounterpartId = createUser("현재매칭상대");
@@ -82,7 +84,8 @@ class ChatListIntegrationTest {
     }
 
     @Test
-    void 확정되지_않은_매칭은_채팅_목록에_포함하지_않는다() throws Exception {
+    @DisplayName("확정되지 않은 매칭은 채팅 목록에서 제외")
+    void 미확정_매칭_목록_제외() throws Exception {
         Long hostId = createUser("대기호스트");
         Long applicantId = createUser("대기신청자");
         OffsetDateTime now = OffsetDateTime.now();
@@ -105,7 +108,8 @@ class ChatListIntegrationTest {
     }
 
     @Test
-    void 매칭_상세에서_상대_사용자와_채팅방_표시_정보를_함께_반환한다() throws Exception {
+    @DisplayName("매칭 상세에서 상대 사용자와 채팅방 표시 정보를 함께 반환")
+    void 매칭_상세_채팅_정보_반환() throws Exception {
         Long hostId = createUser("상세호스트");
         Long applicantId = createUser("상세신청자");
         OffsetDateTime now = OffsetDateTime.now();
@@ -134,7 +138,8 @@ class ChatListIntegrationTest {
     }
 
     @Test
-    void 토큰_없는_채팅_목록_조회는_401로_거부한다() throws Exception {
+    @DisplayName("토큰 없는 채팅 목록 조회는 401")
+    void 인증_없는_목록_조회_거부() throws Exception {
         mockMvc.perform(get("/api/chats"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"));

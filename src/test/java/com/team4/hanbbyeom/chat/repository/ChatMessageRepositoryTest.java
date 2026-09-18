@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.chat.repository;
 import com.team4.hanbbyeom.chat.domain.ChatMessage;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,7 +49,8 @@ class ChatMessageRepositoryTest {
     }
 
     @Test
-    void 메시지를_저장하고_다시_조회할_수_있다() {
+    @DisplayName("메시지 저장 후 저장된 내용 그대로 조회")
+    void 메시지_저장과_조회() {
         ChatMessage saved = chatMessageRepository.saveAndFlush(
                 new ChatMessage(activityMatchId, senderId, "도착했어요.")
         );
@@ -64,7 +66,8 @@ class ChatMessageRepositoryTest {
     }
 
     @Test
-    void 매칭별_메시지를_아이디_오름차순으로_조회한다() {
+    @DisplayName("매칭별 메시지를 id 오름차순으로 조회")
+    void 매칭별_메시지_오름차순_조회() {
         ChatMessage first = saveMessage(activityMatchId, senderId, "첫 번째 메시지");
         ChatMessage second = saveMessage(activityMatchId, senderId, "두 번째 메시지");
         saveMessage(otherActivityMatchId, otherSenderId, "다른 채팅방 메시지");
@@ -78,7 +81,8 @@ class ChatMessageRepositoryTest {
     }
 
     @Test
-    void 마지막으로_받은_아이디_이후의_메시지만_조회한다() {
+    @DisplayName("폴링 커서로 사용하는 afterId 이후의 메시지만 조회")
+    void afterId_이후_메시지_조회() {
         ChatMessage first = saveMessage(activityMatchId, senderId, "첫 번째 메시지");
         ChatMessage second = saveMessage(activityMatchId, senderId, "두 번째 메시지");
         ChatMessage third = saveMessage(activityMatchId, senderId, "세 번째 메시지");
@@ -95,7 +99,8 @@ class ChatMessageRepositoryTest {
     }
 
     @Test
-    void 가장_최근에_저장된_메시지를_조회한다() {
+    @DisplayName("채팅 목록에 표시할 가장 최근 메시지 1건 조회")
+    void 최근_메시지_조회() {
         saveMessage(activityMatchId, senderId, "첫 번째 메시지");
         ChatMessage latest = saveMessage(activityMatchId, senderId, "마지막 메시지");
 
@@ -108,21 +113,24 @@ class ChatMessageRepositoryTest {
     }
 
     @Test
-    void 매칭에_참여하지_않은_사용자는_발신자로_저장할_수_없다() {
+    @DisplayName("매칭 참가자가 아닌 사용자의 발신자 저장 거부")
+    void 비참가자_발신자_저장_거부() {
         assertThatThrownBy(() -> chatMessageRepository.saveAndFlush(
                 new ChatMessage(activityMatchId, otherSenderId, "참가자가 아닌 사용자의 메시지")
         )).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    void 공백으로만_이루어진_메시지는_저장할_수_없다() {
+    @DisplayName("공백뿐인 메시지 저장 거부")
+    void 공백_메시지_저장_거부() {
         assertThatThrownBy(() -> chatMessageRepository.saveAndFlush(
                 new ChatMessage(activityMatchId, senderId, "   ")
         )).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    void 메시지가_100자를_초과하면_저장할_수_없다() {
+    @DisplayName("100자를 초과한 메시지 저장 거부")
+    void 길이_초과_메시지_저장_거부() {
         assertThatThrownBy(() -> chatMessageRepository.saveAndFlush(
                 new ChatMessage(activityMatchId, senderId, "가".repeat(101))
         )).isInstanceOf(DataIntegrityViolationException.class);

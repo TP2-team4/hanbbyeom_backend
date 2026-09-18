@@ -5,6 +5,7 @@ import com.team4.hanbbyeom.chat.repository.ChatMessageRepository;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,12 +55,13 @@ class ChatMessageIntegrationTest {
     private Clock clock;
 
     @BeforeEach
-    void 현재_시각을_테스트가_시작된_시점으로_고정한다() {
+    void setUpFixedClock() {
         setCurrentTime(OffsetDateTime.now(SERVICE_ZONE));
     }
 
     @Test
-    void 참가자가_메시지를_전송하면_JWT_사용자가_발신자로_저장된다() throws Exception {
+    @DisplayName("메시지 전송 시 요청 본문이 아닌 JWT 사용자를 발신자로 저장")
+    void 메시지_전송_발신자_저장() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
@@ -84,7 +86,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 전체_메시지와_마지막_수신_아이디_이후_메시지를_순서대로_조회한다() throws Exception {
+    @DisplayName("전체 메시지와 afterId 이후 메시지를 id 오름차순으로 조회")
+    void 전체_및_afterId_이후_메시지_조회() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
         ChatMessage first = saveMessage(match.activityMatchId(), match.hostId(), "첫 번째 메시지");
         ChatMessage second = saveMessage(match.activityMatchId(), match.applicantId(), "두 번째 메시지");
@@ -108,7 +111,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 종료된_매칭의_과거_참가자는_기존_메시지를_조회할_수_있다() throws Exception {
+    @DisplayName("종료된 매칭의 과거 참가자도 기존 메시지 조회 가능")
+    void 종료_매칭_기존_메시지_조회() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.ENDED, true);
         ChatMessage message = saveMessage(match.activityMatchId(), match.hostId(), "활동 전 메시지");
 
@@ -120,7 +124,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 제삼자의_메시지_조회는_403으로_거부한다() throws Exception {
+    @DisplayName("매칭 참가자가 아닌 제삼자의 메시지 조회는 403")
+    void 제삼자_메시지_조회_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
@@ -130,7 +135,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 존재하지_않는_매칭의_메시지_조회는_404로_처리한다() throws Exception {
+    @DisplayName("존재하지 않는 매칭의 메시지 조회는 404")
+    void 없는_매칭_메시지_조회_거부() throws Exception {
         Long userId = createUser("없는매칭조회자");
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", 999_999_999L)
@@ -140,7 +146,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 확정되지_않은_매칭의_채팅_조회는_409로_거부한다() throws Exception {
+    @DisplayName("확정되지 않은 매칭의 채팅 조회는 409")
+    void 미확정_매칭_채팅_조회_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.PROPOSED, false);
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
@@ -150,7 +157,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 종료_상태여도_활동_예정일_자정_직전에는_새_메시지를_보낼_수_있다() throws Exception {
+    @DisplayName("ENDED 상태여도 활동 예정일 자정 직전이면 메시지 전송 성공")
+    void 종료_상태_활동_당일_전송() throws Exception {
         OffsetDateTime fixedNow = OffsetDateTime.parse("2026-09-18T23:59:59.999999999+09:00");
         setCurrentTime(fixedNow);
         TestMatch match = createMatch(
@@ -171,7 +179,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 일반_활동은_예정일_다음날_자정부터_새_메시지를_보낼_수_없다() throws Exception {
+    @DisplayName("일반 활동은 예정일 다음 날 자정부터 메시지 전송 차단")
+    void 활동_예정일_경과_전송_거부() throws Exception {
         setCurrentTime(OffsetDateTime.parse("2026-09-19T00:00:00+09:00"));
         TestMatch match = createMatch(
                 ActivityMatchStatus.ENDED,
@@ -183,7 +192,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 자정을_넘겨_끝나는_심야_활동은_예정_종료_시각까지_전송할_수_있다() throws Exception {
+    @DisplayName("자정을 넘겨 끝나는 심야 활동은 예정 종료 시각까지 전송 성공")
+    void 심야_활동_종료_시각까지_전송() throws Exception {
         setCurrentTime(OffsetDateTime.parse("2026-09-19T00:30:00+09:00"));
         TestMatch match = createMatch(
                 ActivityMatchStatus.CONFIRMED,
@@ -195,7 +205,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 전송_마감_시각부터_새_메시지를_보낼_수_없다() throws Exception {
+    @DisplayName("심야 활동도 전송 마감 시각부터는 메시지 전송 차단")
+    void 전송_마감_경과_전송_거부() throws Exception {
         setCurrentTime(OffsetDateTime.parse("2026-09-19T01:00:00+09:00"));
         TestMatch match = createMatch(
                 ActivityMatchStatus.CONFIRMED,
@@ -207,7 +218,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 확정_후_취소_상태에는_전송_마감_전이어도_메시지를_보낼_수_없다() throws Exception {
+    @DisplayName("확정 후 취소 상태는 전송 마감 전이어도 메시지 전송 차단")
+    void 취소_상태_전송_거부() throws Exception {
         setCurrentTime(OffsetDateTime.parse("2026-09-18T20:00:00+09:00"));
         TestMatch match = createMatch(
                 ActivityMatchStatus.CANCELLED,
@@ -219,7 +231,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 공백뿐인_메시지와_100자_초과_메시지는_400으로_거부한다() throws Exception {
+    @DisplayName("공백뿐인 메시지와 100자 초과 메시지는 400")
+    void 잘못된_메시지_내용_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
         String token = bearerToken(match.hostId());
 
@@ -243,7 +256,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 음수_afterId는_400으로_거부한다() throws Exception {
+    @DisplayName("음수 afterId 조회 요청은 400")
+    void 음수_afterId_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
@@ -254,7 +268,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 숫자가_아닌_afterId는_공통_형식의_400으로_거부한다() throws Exception {
+    @DisplayName("숫자가 아닌 afterId는 공통 ErrorResponse 형식의 400")
+    void 형식_오류_afterId_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
@@ -266,7 +281,8 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
-    void 토큰_없는_메시지_조회는_401로_거부한다() throws Exception {
+    @DisplayName("토큰 없는 메시지 조회는 401")
+    void 인증_없는_메시지_조회_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId()))
