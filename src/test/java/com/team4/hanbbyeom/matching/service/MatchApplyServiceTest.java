@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import jakarta.persistence.EntityManager;
@@ -16,11 +17,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.assertj.core.api.Assertions.within;
 
 @SpringBootTest
 @Transactional
@@ -30,6 +33,7 @@ class MatchApplyServiceTest {
     @Autowired private MatchRequestCommandService matchRequestCommandService;
     @Autowired private MatchDecisionService matchDecisionService;
     @Autowired private MatchRequestRepository matchRequestRepository;
+    @Autowired private ActivityMatchRepository activityMatchRepository;
     @Autowired private MatchParticipantRepository matchParticipantRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @PersistenceContext private EntityManager entityManager;
@@ -126,34 +130,22 @@ class MatchApplyServiceTest {
         assertThat(participants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
     }
 
-    // 회귀 테스트: 팀원 리뷰로 발견된 정책 모순 — 게시글 등록은 3시간 뒤 일정부터 허용됐지만,
-    // 신청은 24시간(DECISION_WINDOW_HOURS)보다 더 남아야만 성공해서, 3~24시간 뒤 일정으로
-    // 등록된 글은 등록은 되지만 아무도 신청할 수 없었다. MatchRequestCommandService의 최소
-    // 리드타임(MIN_LEAD_HOURS)을 DECISION_WINDOW_HOURS + 1시간으로 올려서 이 모순을 없앴다.
+    // 회귀 테스트: 게시글 등록(최소 리드타임 3시간)과 신청 가능 기한(24시간) 사이의 정책
+    // 모순 — 3~24시간 뒤 일정 글은 등록은 되지만 아무도 신청할 수 없던 문제(팀원 1차 리뷰로
+    // 발견). 처음엔 등록 최소 리드타임을 25시간으로 올려서 고쳤었으나, 그러면 당일 매칭
+    // ("오늘 저녁 같이 뛸 사람 구하기")이라는 핵심 시나리오 자체가 막혀버린다는 2차 리뷰
+    // 피드백을 받고 방향을 바꿨다. 등록 최소 리드타임(MIN_LEAD_HOURS=3시간)은 그대로 두고,
+    // 대신 apply()가 호스트 응답 기한을 "최대 24시간, 활동 시작 1시간 전을 넘지 않도록"
+    // 동적으로 계산하도록 고쳐서, 등록 가능한 모든 리드타임에서 등록 직후 바로 신청까지
+    // 가능해야 한다.
     @Test
-    void 예전에는_등록됐지만_아무도_신청할_수_없었던_리드타임은_이제_등록_자체가_거부된다() {
-        // 예전 기준(MIN_LEAD_HOURS=3시간)으로는 등록 성공했지만, 신청 기준(24시간)에는
-        // 못 미치던 "죽은 구간" 리드타임.
-        MatchRequestCreateRequest deadZoneRequest = new MatchRequestCreateRequest(
+    void 최소_리드타임으로_등록해도_등록_직후_바로_신청할_수_있다() {
+        MatchRequestCreateRequest sameDayRequest = new MatchRequestCreateRequest(
                 courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                OffsetDateTime.now().plusHours(10), "SILENT"
+                OffsetDateTime.now().plusHours(3).plusMinutes(5), "SILENT" // MIN_LEAD_HOURS(3시간) 경계에 너무 딱 붙지 않게 여유를 둔다
         );
-
-        assertThatThrownBy(() -> matchRequestCommandService.create(hostUserId, deadZoneRequest))
-                .isInstanceOf(InvalidMatchRequestException.class);
-    }
-
-    @Test
-    void 최소_리드타임으로_등록한_게시글은_등록_직후_바로_신청할_수_있다() {
-        // MIN_LEAD_HOURS(=DECISION_WINDOW_HOURS+1시간) 경계에 최대한 가깝게 등록해도,
-        // 등록 직후 신청이 실패하지 않아야 한다 — "등록은 되는데 신청은 못 하는" 모순이
-        // 없어졌음을 등록→신청을 실제로 이어서 실행해 확인한다.
-        MatchRequestCreateRequest boundaryRequest = new MatchRequestCreateRequest(
-                courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                OffsetDateTime.now().plusHours(26), "SILENT"
-        );
-        Long newHostUserId = createUser("host2");
-        Long newHostRequestId = matchRequestCommandService.create(newHostUserId, boundaryRequest);
+        Long newHostUserId = createUser("host-sameday");
+        Long newHostRequestId = matchRequestCommandService.create(newHostUserId, sameDayRequest);
         // RunMatchCondition은 @MapsId라 save() 시점에 즉시 INSERT되지 않고 flush까지 지연될 수
         // 있는데, apply()가 이걸 raw SQL로 직접 조회하므로 명시적으로 flush해서 보이게 한다
         // (MatchingFlowIntegrationTest와 동일한 이유 — 실제 운영에서는 create()와 apply()가
@@ -163,6 +155,66 @@ class MatchApplyServiceTest {
         Long activityMatchId = matchApplyService.apply(applicantUserId, newHostRequestId);
 
         assertThat(activityMatchId).isNotNull();
+    }
+
+    // 위와 같은 이유로, 예전 1차 수정(MIN_LEAD_HOURS=25시간) 이전에 "죽은 구간"이었던
+    // 리드타임(10시간)도 이제 등록과 신청이 모두 성공해야 한다.
+    @Test
+    void 예전에_죽은_구간이었던_리드타임도_등록과_신청이_모두_성공한다() {
+        MatchRequestCreateRequest deadZoneRequest = new MatchRequestCreateRequest(
+                courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
+                OffsetDateTime.now().plusHours(10), "SILENT"
+        );
+        Long newHostUserId = createUser("host-deadzone");
+        Long newHostRequestId = matchRequestCommandService.create(newHostUserId, deadZoneRequest);
+        entityManager.flush();
+
+        Long activityMatchId = matchApplyService.apply(applicantUserId, newHostRequestId);
+
+        assertThat(activityMatchId).isNotNull();
+    }
+
+    // 호스트 응답 기한이 실제로 "최대 24시간, 활동 시작 1시간 전을 넘지 않도록" 계산되는지
+    // 직접 확인한다 — 임박한 일정(3시간 뒤)은 응답 기한이 24시간 뒤가 아니라 활동 시작
+    // 1시간 전(약 2시간 뒤)으로 짧게 잡혀야 한다.
+    @Test
+    void 임박한_일정은_응답_기한이_활동_시작_1시간_전으로_짧게_잡힌다() {
+        // MIN_LEAD_HOURS(3시간) 경계에 너무 딱 붙으면 create() 실행 시점의 now()가 살짝 더
+        // 늦어져서 검증에 걸릴 수 있으므로 여유를 둔다.
+        OffsetDateTime scheduledAt = OffsetDateTime.now().plusHours(3).plusMinutes(5);
+        MatchRequestCreateRequest sameDayRequest = new MatchRequestCreateRequest(
+                courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
+                scheduledAt, "SILENT"
+        );
+        Long newHostUserId = createUser("host-shortwindow");
+        Long newHostRequestId = matchRequestCommandService.create(newHostUserId, sameDayRequest);
+        entityManager.flush();
+
+        Long activityMatchId = matchApplyService.apply(applicantUserId, newHostRequestId);
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getDecisionExpiresAt())
+                .isCloseTo(scheduledAt.minusHours(1), within(2, ChronoUnit.SECONDS));
+    }
+
+    // 반대로 충분히 먼 일정(200시간 뒤)은 원래대로 24시간을 다 써야 한다.
+    @Test
+    void 충분히_먼_일정은_응답_기한이_24시간_전체를_쓴다() {
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime scheduledAt = now.plusHours(200);
+        MatchRequestCreateRequest farAwayRequest = new MatchRequestCreateRequest(
+                courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
+                scheduledAt, "SILENT"
+        );
+        Long newHostUserId = createUser("host-fullwindow");
+        Long newHostRequestId = matchRequestCommandService.create(newHostUserId, farAwayRequest);
+        entityManager.flush();
+
+        Long activityMatchId = matchApplyService.apply(applicantUserId, newHostRequestId);
+
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId).orElseThrow();
+        assertThat(activityMatch.getDecisionExpiresAt())
+                .isCloseTo(now.plusHours(24), within(2, ChronoUnit.SECONDS));
     }
 
     // 화면(26 "내가 신청한 모집")의 탭 구성(전체/대기 중/수락됨/거절됨/취소함)에 맞춰, 같은
@@ -214,6 +266,15 @@ class MatchApplyServiceTest {
                 .extracting(MyApplicationResponse::activityMatchId).containsExactly(rejectedId);
         assertThat(matchApplyService.getMyApplications(applicantUserId, "CANCELLED"))
                 .extracting(MyApplicationResponse::activityMatchId).containsExactly(cancelledId);
+    }
+
+    // 회귀 테스트: status에 오타 등 알 수 없는 값이 오면 빈 배열(200)이 아니라 400으로 막아야
+    // 한다 — 안 그러면 "신청 내역이 없음"과 "필터 값이 잘못됨"이 구분 안 돼서 디버깅이
+    // 어렵다(팀원 리뷰로 발견).
+    @Test
+    void 유효하지_않은_status_필터는_예외가_발생한다() {
+        assertThatThrownBy(() -> matchApplyService.getMyApplications(applicantUserId, "FOO"))
+                .isInstanceOf(InvalidMatchRequestException.class);
     }
 
     @Test

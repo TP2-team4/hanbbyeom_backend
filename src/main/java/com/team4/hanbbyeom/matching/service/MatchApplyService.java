@@ -13,14 +13,12 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class MatchApplyService {
 
-    // 호스트 응답 대기 기한. MatchRequestCommandService.MIN_LEAD_HOURS가 이 값보다 커야
-    // "등록은 됐는데 아무도 신청할 수 없는 글"이 생기지 않으므로(팀원 리뷰로 발견), 패키지
-    // 밖에서 못 보게 private으로 감싸지 않고 그대로 참조해서 두 값이 다시 어긋나지 않게 한다.
-    static final long DECISION_WINDOW_HOURS = 24;
+    private static final long DECISION_WINDOW_HOURS = 24; // 호스트 응답 대기 기한(최대치 — 실제로는 활동 시작 1시간 전을 넘지 않도록 아래 apply()에서 제한)
     private static final long ACTIVITY_DURATION_HOURS = 2; // scheduled_end_at 계산용 고정 버퍼 (프론트 미노출, 종료 배치 내부용)
 
     private final MatchRequestRepository matchRequestRepository;
@@ -78,13 +76,27 @@ public class MatchApplyService {
         String courseName = (String) condition.get("course_name");
         String routeDescription = (String) condition.get("route_description");
 
+        OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime scheduledAt = hostRequest.getScheduledAt();
         // scheduled_end_at은 프론트에 노출되지 않는 내부용 컬럼이라 정밀 계산 없이 고정 버퍼로 처리
         OffsetDateTime scheduledEndAt = scheduledAt.plusHours(ACTIVITY_DURATION_HOURS);
-        OffsetDateTime decisionExpiresAt = OffsetDateTime.now().plusHours(DECISION_WINDOW_HOURS);
 
-        // decisionExpiresAt이 scheduledAt보다 늦으면 chk_activity_match_time 위반 → 사전 검증
-        if (!decisionExpiresAt.isBefore(scheduledAt)) {
+        // 호스트 응답 기한은 "최대 24시간, 단 활동 시작 1시간 전을 넘지 않도록" 제한한다.
+        // 예전엔 무조건 now+24시간으로 고정해서, 등록 최소 리드타임(3시간)보다 짧게 남은
+        // 일정(예: 오늘 저녁 신청)은 등록은 되지만 신청은 거절되는 모순이 있었다(팀원 리뷰로
+        // 발견). "등록 최소 리드타임을 24시간보다 늘린다"는 대안도 있었지만, 그러면 당일
+        // 매칭("오늘 저녁 같이 뛸 사람 구하기")이라는 핵심 시나리오 자체가 막혀버려서
+        // 기각했다(2차 리뷰 피드백). 대신 임박한 일정일수록 호스트가 더 빨리 답해야 한다는
+        // 쪽으로 응답 기한 자체를 유동적으로 줄인다 — 등록 리드타임 정책은 건드리지 않는다.
+        OffsetDateTime maxDecisionExpiresAt = now.plusHours(DECISION_WINDOW_HOURS);
+        OffsetDateTime latestPossibleDecisionExpiresAt = scheduledAt.minusHours(1);
+        OffsetDateTime decisionExpiresAt = maxDecisionExpiresAt.isBefore(latestPossibleDecisionExpiresAt)
+                ? maxDecisionExpiresAt
+                : latestPossibleDecisionExpiresAt;
+
+        // 활동 시작까지 1시간도 안 남아서 decisionExpiresAt이 이미 지금(now)보다 이전이면
+        // 호스트가 응답할 시간 자체가 없으므로 신청을 막는다.
+        if (!decisionExpiresAt.isAfter(now)) {
             throw new InvalidMatchRequestException("활동 시작 시각이 너무 임박해서 신청할 수 없어요.");
         }
 
@@ -176,11 +188,25 @@ public class MatchApplyService {
         }
     }
 
+    // getMyApplications()의 status 파라미터로 허용되는 값 — MyApplicationResponse.status()가
+    // 실제로 내려주는 값과 정확히 같은 집합이어야 한다.
+    private static final Set<String> VALID_APPLICATION_STATUSES = Set.of("PENDING", "ACCEPTED", "REJECTED", "CANCELLED");
+
     // 신청자 본인이 지금까지 넣은 신청 내역 전체 조회(GET /api/matching/board/applications).
     // statusFilter가 null이면 전체, 아니면 PENDING/ACCEPTED/REJECTED/CANCELLED 중 하나로 걸러
     // 화면(26)의 탭(전체/대기 중/수락됨/거절됨/취소함)을 그대로 지원한다. 읽기 전용이라 락을
     // 잡지 않는다 — apply()/cancelApplication()과 달리 matching_mutex와 무관.
+    //
+    // status에 오타 등 알 수 없는 값이 오면 조용히 빈 배열을 내려주는 대신 400으로 막는다 —
+    // 그렇지 않으면 "신청 내역이 없음"과 "필터 값이 잘못됨"이 응답만으로 구분이 안 돼서
+    // 프론트/QA가 디버깅하기 어렵다(팀원 리뷰로 발견).
     public List<MyApplicationResponse> getMyApplications(Long applicantUserId, String statusFilter) {
+        if (statusFilter != null && !VALID_APPLICATION_STATUSES.contains(statusFilter)) {
+            throw new InvalidMatchRequestException(
+                    "status는 PENDING/ACCEPTED/REJECTED/CANCELLED 중 하나여야 해요."
+            );
+        }
+
         return activityMatchRepository.findMyApplications(applicantUserId).stream()
                 .map(row -> toMyApplicationResponse(row, applicantUserId))
                 .filter(response -> statusFilter == null || statusFilter.equals(response.status()))

@@ -26,7 +26,7 @@ class MatchRequestCommandServiceTest {
                 9000,
                 360,
                 400,
-                OffsetDateTime.now().plusMinutes(30), // 최소 리드타임(25시간)보다 훨씬 임박함
+                OffsetDateTime.now().plusMinutes(30), // 최소 리드타임(3시간)보다 훨씬 임박함
                 "SILENT"
         );
 
