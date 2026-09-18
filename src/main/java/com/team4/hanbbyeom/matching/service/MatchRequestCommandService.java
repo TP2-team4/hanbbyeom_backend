@@ -105,6 +105,11 @@ public class MatchRequestCommandService {
     // create()/update() 공용 — 활동 시작 시각이 너무 임박하면 (scheduledAt - 1시간으로 계산되는)
     // searchExpiresAt이 created_at보다 앞서버려 DB 제약(chk_match_request_time)을 위반하게 되므로,
     // 저장 전에 미리 걸러서 500 대신 400으로 응답한다.
+    // (참고: 등록 최소 리드타임과 신청 가능 기한은 서로 다른 정책이다 — 신청 시 호스트 응답
+    // 기한은 MatchApplyService.apply()가 "최대 24시간, 단 활동 시작 1시간 전을 넘지 않도록"
+    // 동적으로 계산해서 여기 MIN_LEAD_HOURS와 무관하게 항상 유효한 신청 가능 구간을 보장한다
+    // — 한때 이 값을 24시간보다 크게 고정하는 방식으로 고쳤었으나, 당일 등록·매칭이라는
+    // 핵심 시나리오를 막아버려 되돌렸다.)
     private void validateScheduledAt(OffsetDateTime scheduledAt) {
         OffsetDateTime minAllowed = OffsetDateTime.now().plusHours(MIN_LEAD_HOURS);
         if (scheduledAt.isBefore(minAllowed)) {

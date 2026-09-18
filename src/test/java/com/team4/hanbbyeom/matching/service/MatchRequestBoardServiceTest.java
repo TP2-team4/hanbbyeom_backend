@@ -5,6 +5,7 @@ import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -162,5 +163,25 @@ class MatchRequestBoardServiceTest {
     void 대기중인_신청이_없으면_예외가_발생한다() {
         assertThatThrownBy(() -> matchRequestBoardService.getPendingApplication(testUserId, testMatchRequestId))
                 .isInstanceOf(PendingApplicationNotFoundException.class);
+    }
+
+    @Test
+    void 내_활성_모집글을_조회하면_해당_게시글이_반환된다() {
+        MatchRequestResponse response = matchRequestBoardService.getMyActiveRequest(testUserId);
+
+        assertThat(response.id()).isEqualTo(testMatchRequestId);
+        assertThat(response.isOwner()).isTrue();
+    }
+
+    @Test
+    void 활성_모집글이_없으면_예외가_발생한다() {
+        Long noRequestUserId = jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
+                Long.class,
+                "no-request-" + System.nanoTime() + "@example.com", "dummy-hash", "글없음", OffsetDateTime.now()
+        );
+
+        assertThatThrownBy(() -> matchRequestBoardService.getMyActiveRequest(noRequestUserId))
+                .isInstanceOf(MatchRequestNotFoundException.class);
     }
 }
