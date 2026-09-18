@@ -340,4 +340,56 @@ class MatchingFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("EXPIRED"));
     }
+
+    // 화면(26 "내가 신청한 모집")이 실제 HTTP 요청+JWT 인증을 거쳐서도 동작하는지, 그리고
+    // status 쿼리 파라미터로 걸러지는지 확인한다. EXPIRED는 신청자 입장에서 REJECTED로
+    // 재매핑된다는 사실도 이 경로로 같이 확인한다(위 테스트는 원본 activity_match.status만 봄).
+    @Test
+    @DisplayName("내 신청 내역을 조회하면 자동 만료된 신청도 REJECTED로 나오고, status로 필터링된다")
+    void 내_신청_내역을_조회하면_상태별로_필터링된다() throws Exception {
+        Long hostUserId = createUser("호스트4");
+        Long applicantUserId = createUser("신청자4");
+        String hostToken = bearerTokenOf(hostUserId);
+        String applicantToken = bearerTokenOf(applicantUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+
+        makeDeadlineOverdue(activityMatchId);
+        entityManager.clear();
+        matchDecisionService.expireOverdue();
+
+        // 전체 조회 — 방금 자동 만료된 신청 1건이 REJECTED로 재매핑돼서 나와야 한다.
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].activityMatchId").value(activityMatchId))
+                .andExpect(jsonPath("$[0].status").value("REJECTED"));
+
+        // status=REJECTED로 필터링하면 그대로 나오고, status=PENDING으로 필터링하면 빈 배열이어야 한다.
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .param("status", "REJECTED")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .param("status", "PENDING")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
 }

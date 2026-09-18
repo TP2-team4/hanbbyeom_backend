@@ -1,6 +1,8 @@
 package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
+import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.matching.repository.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -170,5 +174,45 @@ public class MatchApplyService {
                     .orElseThrow(() -> new MatchRequestNotFoundException(applicantMatchRequestId));
             applicantRequest.changeStatus(MatchRequestStatus.SEARCHING);
         }
+    }
+
+    // 신청자 본인이 지금까지 넣은 신청 내역 전체 조회(GET /api/matching/board/applications).
+    // statusFilter가 null이면 전체, 아니면 PENDING/ACCEPTED/REJECTED/CANCELLED 중 하나로 걸러
+    // 화면(26)의 탭(전체/대기 중/수락됨/거절됨/취소함)을 그대로 지원한다. 읽기 전용이라 락을
+    // 잡지 않는다 — apply()/cancelApplication()과 달리 matching_mutex와 무관.
+    public List<MyApplicationResponse> getMyApplications(Long applicantUserId, String statusFilter) {
+        return activityMatchRepository.findMyApplications(applicantUserId).stream()
+                .map(row -> toMyApplicationResponse(row, applicantUserId))
+                .filter(response -> statusFilter == null || statusFilter.equals(response.status()))
+                .toList();
+    }
+
+    private MyApplicationResponse toMyApplicationResponse(ActivityMatchRepository.MyApplicationRow row,
+                                                           Long applicantUserId) {
+        return new MyApplicationResponse(
+                row.getId(),
+                toDisplayStatus(row.getStatus(), row.getClosedByUserId(), applicantUserId),
+                row.getCourseName(),
+                row.getDistanceMinMeters(),
+                row.getDistanceMaxMeters(),
+                row.getScheduledAt().atOffset(ZoneOffset.UTC),
+                row.getTalkLevel(),
+                new MatchBoardItemResponse.AuthorSummary(row.getHostNickname(), row.getHostRating(), row.getHostCompletedCount())
+        );
+    }
+
+    // activity_match.status를 화면 탭에 맞춘 4가지 표시 상태로 재매핑 — MyApplicationResponse
+    // 클래스 주석에 각 케이스의 판단 기준을 적어뒀다.
+    private String toDisplayStatus(String rawStatus, Long closedByUserId, Long applicantUserId) {
+        return switch (ActivityMatchStatus.valueOf(rawStatus)) {
+            case PROPOSED -> "PENDING";
+            case CONFIRMED, ENDED -> "ACCEPTED";
+            case REJECTED -> applicantUserId.equals(closedByUserId) ? "CANCELLED" : "REJECTED";
+            case EXPIRED -> "REJECTED";
+            // CANCELLED는 현재 어디서도 실제로 세팅하지 않는 상태다(cancelApplication()이
+            // REJECTED를 재사용함 — 위 주석 참고). 그래도 enum 값이 존재하는 한 switch를
+            // 완전하게 유지해야 하므로, 나중에 실제로 쓰이게 되더라도 자연스럽게 맞도록 매핑해둔다.
+            case CANCELLED -> "CANCELLED";
+        };
     }
 }

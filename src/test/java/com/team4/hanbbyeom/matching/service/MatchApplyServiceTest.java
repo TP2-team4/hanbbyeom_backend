@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
+import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -15,9 +16,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @SpringBootTest
 @Transactional
@@ -25,6 +28,7 @@ class MatchApplyServiceTest {
 
     @Autowired private MatchApplyService matchApplyService;
     @Autowired private MatchRequestCommandService matchRequestCommandService;
+    @Autowired private MatchDecisionService matchDecisionService;
     @Autowired private MatchRequestRepository matchRequestRepository;
     @Autowired private MatchParticipantRepository matchParticipantRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -62,6 +66,24 @@ class MatchApplyServiceTest {
                 Long.class,
                 label + "-" + System.nanoTime() + "@example.com", "dummy-hash", label, OffsetDateTime.now()
         );
+    }
+
+    // getMyApplications() 테스트가 여러 호스트 게시글을 만들 때 쓰는, setUp()과 동일한 패턴의 헬퍼.
+    private Long createHostRequest(Long ownerUserId) {
+        MatchRequest request = new MatchRequest(
+                ownerUserId, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT,
+                OffsetDateTime.now().plusHours(9)
+        );
+        Long requestId = matchRequestRepository.save(request).getId();
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                requestId, courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
+        );
+        return requestId;
     }
 
     @Test
@@ -141,5 +163,99 @@ class MatchApplyServiceTest {
         Long activityMatchId = matchApplyService.apply(applicantUserId, newHostRequestId);
 
         assertThat(activityMatchId).isNotNull();
+    }
+
+    // 화면(26 "내가 신청한 모집")의 탭 구성(전체/대기 중/수락됨/거절됨/취소함)에 맞춰, 같은
+    // 신청자가 넣은 서로 다른 결과의 신청들이 각각 올바른 표시 상태로 매핑되는지, 그리고
+    // status 필터가 정확히 그 건만 걸러내는지 확인한다.
+    //
+    // ACCEPTED는 별도 신청자로 검증한다(아래 다른 테스트) — uq_participant_active_user
+    // 부분 유니크 인덱스 때문에 한 유저는 "아직 안 풀린(released_at이 null인)" 참여를
+    // 동시에 2개 가질 수 없는데, PENDING과 ACCEPTED(=CONFIRMED) 둘 다 release()를 안 하는
+    // 상태라 같은 신청자로 이 둘을 동시에 만들 수 없다. REJECTED/CANCELLED는 release()를
+    // 하므로 PENDING 하나와 함께 같은 신청자에게 공존할 수 있다.
+    @Test
+    void 신청_내역_목록에_각_결과가_올바른_상태로_매핑되고_필터링된다() {
+        // REJECTED: 신청 후 호스트가 거절 — release()되어 참여 슬롯이 풀린다.
+        Long rejectedHostUserId = createUser("host-rejected");
+        Long rejectedHostRequestId = createHostRequest(rejectedHostUserId);
+        Long rejectedId = matchApplyService.apply(applicantUserId, rejectedHostRequestId);
+        matchDecisionService.reject(rejectedHostUserId, rejectedId);
+        // MatchParticipant가 IDENTITY 전략이라 다음 apply()의 참여자 INSERT가 즉시 실행되는데,
+        // 그 전에 방금 release()로 세팅한 released_at UPDATE가 먼저 DB에 반영돼 있어야
+        // uq_participant_active_user 제약을 안 어긴다. 실제 운영에서는 reject()와 apply()가
+        // 항상 별개 트랜잭션(별개 HTTP 요청)이라 이 순서가 자동으로 보장되지만, 테스트는 하나의
+        // 트랜잭션을 공유하므로 명시적으로 flush해서 순서를 맞춰준다.
+        entityManager.flush();
+
+        // CANCELLED: 신청 후 신청자 본인이 취소 — 마찬가지로 release()되어 슬롯이 풀린다.
+        Long cancelledHostUserId = createUser("host-cancelled");
+        Long cancelledHostRequestId = createHostRequest(cancelledHostUserId);
+        Long cancelledId = matchApplyService.apply(applicantUserId, cancelledHostRequestId);
+        matchApplyService.cancelApplication(applicantUserId, cancelledHostRequestId);
+        entityManager.flush();
+
+        // PENDING: setUp()의 hostRequestId에 신청만 하고 아무도 응답하지 않은 상태 —
+        // 위 두 건이 이미 release()됐으므로 이 신청이 유일한 "활성" 참여로 남는다.
+        Long pendingId = matchApplyService.apply(applicantUserId, hostRequestId);
+
+        List<MyApplicationResponse> all = matchApplyService.getMyApplications(applicantUserId, null);
+        assertThat(all)
+                .extracting(MyApplicationResponse::activityMatchId, MyApplicationResponse::status)
+                .containsExactlyInAnyOrder(
+                        tuple(pendingId, "PENDING"),
+                        tuple(rejectedId, "REJECTED"),
+                        tuple(cancelledId, "CANCELLED")
+                );
+
+        assertThat(matchApplyService.getMyApplications(applicantUserId, "PENDING"))
+                .extracting(MyApplicationResponse::activityMatchId).containsExactly(pendingId);
+        assertThat(matchApplyService.getMyApplications(applicantUserId, "REJECTED"))
+                .extracting(MyApplicationResponse::activityMatchId).containsExactly(rejectedId);
+        assertThat(matchApplyService.getMyApplications(applicantUserId, "CANCELLED"))
+                .extracting(MyApplicationResponse::activityMatchId).containsExactly(cancelledId);
+    }
+
+    @Test
+    void 수락된_신청은_ACCEPTED로_매핑된다() {
+        // 위 테스트와 달리 별도 신청자를 쓴다 — CONFIRMED도 release()를 안 하는 상태라서,
+        // 같은 신청자에게 PENDING과 동시에 공존시킬 수 없기 때문(테스트 격리 목적).
+        Long acceptedApplicantUserId = createUser("applicant-accepted");
+        Long acceptedHostUserId = createUser("host-accepted");
+        Long acceptedHostRequestId = createHostRequest(acceptedHostUserId);
+        Long acceptedId = matchApplyService.apply(acceptedApplicantUserId, acceptedHostRequestId);
+        matchDecisionService.accept(acceptedHostUserId, acceptedId);
+
+        assertThat(matchApplyService.getMyApplications(acceptedApplicantUserId, null))
+                .extracting(MyApplicationResponse::activityMatchId, MyApplicationResponse::status)
+                .containsExactly(tuple(acceptedId, "ACCEPTED"));
+        assertThat(matchApplyService.getMyApplications(acceptedApplicantUserId, "ACCEPTED"))
+                .extracting(MyApplicationResponse::activityMatchId).containsExactly(acceptedId);
+    }
+
+    // EXPIRED(호스트가 응답 기한을 넘겨 시스템이 자동 만료시킨 경우)도 신청자 입장에서는
+    // 호스트가 직접 거절한 것과 결과가 같으므로("내 신청이 받아들여지지 않음") REJECTED
+    // 버킷으로 묶인다 — CANCELLED(본인이 취소)와 구분되는 지점.
+    @Test
+    void 자동_만료된_신청은_REJECTED로_매핑된다() {
+        Long expiredHostUserId = createUser("host-expired");
+        Long expiredHostRequestId = createHostRequest(expiredHostUserId);
+        Long expiredId = matchApplyService.apply(applicantUserId, expiredHostRequestId);
+
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                expiredId
+        );
+        entityManager.clear();
+
+        matchDecisionService.expireOverdue();
+
+        assertThat(matchApplyService.getMyApplications(applicantUserId, "REJECTED"))
+                .extracting(MyApplicationResponse::activityMatchId).containsExactly(expiredId);
     }
 }
