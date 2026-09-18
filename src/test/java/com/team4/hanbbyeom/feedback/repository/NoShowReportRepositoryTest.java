@@ -51,7 +51,8 @@ public class NoShowReportRepositoryTest {
                         "뚝섬유원지역 3번 출구",
                         360,
                         400,
-                        OffsetDateTime.now().plusMinutes(10)
+                        OffsetDateTime.now().plusMinutes(10),
+                        OffsetDateTime.now()
                 )
         );
         activityMatchId = savedMatch.getId();
