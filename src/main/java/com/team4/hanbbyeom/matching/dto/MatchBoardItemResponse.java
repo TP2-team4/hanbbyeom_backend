@@ -25,9 +25,12 @@ public record MatchBoardItemResponse(
             String nickname,
             @Schema(description = "받은 후기의 평균 별점. 후기가 하나도 없으면 null", example = "4.5", nullable = true)
             Double rating,
-            @Schema(description = "완료한 활동 수", example = "12")
+            // rating/completedCount/noShowCount는 trust_profile을 LEFT JOIN해서 오므로, 아직 아무 활동 이력이 없는
+            // 사용자(행 자체가 없음)는 셋 다 null이다. 프로필 조회 API(TrustProfileLookupService.lookup())는 같은
+            // 경우 0을 주는데, 이 차이는 #94(trust_profile 소유권 정리)에서 한 곳으로 모으며 통일할 예정.
+            @Schema(description = "완료한 활동 수. 활동 이력이 전혀 없는 사용자는 null", example = "12", nullable = true)
             Integer completedCount,
-            @Schema(description = "받은 노쇼 신고 횟수", example = "0")
+            @Schema(description = "받은 노쇼 신고 횟수. 활동 이력이 전혀 없는 사용자는 null", example = "0", nullable = true)
             Integer noShowCount,
             @Schema(description = "가장 최근에 받은 후기 한 줄. 받은 후기가 하나도 없으면 null", nullable = true)
             LatestReview latestReview
