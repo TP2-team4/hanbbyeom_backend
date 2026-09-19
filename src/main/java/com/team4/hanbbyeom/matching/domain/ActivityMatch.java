@@ -126,6 +126,16 @@ public class ActivityMatch {
         this.closedAt = OffsetDateTime.now();
     }
 
+    // 참가자 탈퇴로 더 이상 성사될 수 없는 확정(CONFIRMED) 매칭을 닫는다.
+    // 노쇼가 아니라 사전 취소이므로 no_show_report_count는 건드리지 않고, 시스템 처리이므로
+    // closedByUserId는 남기지 않는다(expire()와 동일). confirmedAt/meetingCode는 그대로 둔다 —
+    // 채팅이 confirmedAt으로 "한 번이라도 확정된 매칭인지"를 판단해 과거 대화 조회를 유지하기 때문이다.
+    // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다(end()와 동일한 이유).
+    public void cancelByWithdrawal() {
+        this.status = ActivityMatchStatus.CANCELLED;
+        this.closedAt = OffsetDateTime.now();
+    }
+
     // 확정(CONFIRMED)된 활동이 예정 종료 시각(scheduled_end_at)을 지나 자연 종료됐을 때 호출.
     // expire()와 마찬가지로 시스템이 자동으로 처리하는 것이라 closedByUserId는 남기지 않는다.
     // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다 — 안 그러면 확정된 매칭의

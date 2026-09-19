@@ -55,6 +55,20 @@ public class MatchApplyService {
             throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
         }
 
+        // 탈퇴한 호스트는 영원히 수락·거절할 수 없어 신청자만 응답 기한까지 묶인다.
+        // 회원 탈퇴는 탈퇴 시점에 호스트 게시글을 취소하지만(MatchDecisionService.closeMatchesOnWithdrawal),
+        // 그 정리를 거치지 않고 남은 게시글이나 캐시된 id로 들어오는 직접 신청에 대비해 신청 시점에도 한 번 더
+        // 확인하는 방어선이다(게시판 목록 필터 searchBoard는 발견만 막을 뿐이다).
+        // 탈퇴 여부가 드러나지 않도록 위 상태 검사와 같은 메시지를 사용한다.
+        // (users는 matching 도메인이 직접 참조하지 않으므로 fetchNicknames()처럼 jdbcTemplate으로 조회)
+        Boolean hostWithdrawn = jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM users WHERE id = ?",
+                Boolean.class, hostRequest.getUserId()
+        );
+        if (Boolean.TRUE.equals(hostWithdrawn)) {
+            throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
+        }
+
         // 3) 호스트의 run_match_condition + running_course 조회 (코스명/거리/페이스/만나는 곳)
         Map<String, Object> condition = jdbcTemplate.queryForMap(
                 """
@@ -239,10 +253,10 @@ public class MatchApplyService {
             case CONFIRMED, ENDED -> "ACCEPTED";
             case REJECTED -> applicantUserId.equals(closedByUserId) ? "CANCELLED" : "REJECTED";
             case EXPIRED -> "REJECTED";
-            // CANCELLED는 현재 어디서도 실제로 세팅하지 않는 상태다(cancelApplication()이
-            // REJECTED를 재사용함 — 위 주석 참고). 그래도 enum 값이 존재하는 한 switch를
-            // 완전하게 유지해야 하므로, 나중에 실제로 쓰이게 되더라도 자연스럽게 맞도록 매핑해둔다.
-            case CANCELLED -> "CANCELLED";
+            // CANCELLED는 확정 후 취소된 매칭(현재는 참가자 회원 탈퇴 시 시스템이 처리, closedByUserId=null)이다.
+            // "취소함" 탭은 신청자가 직접 취소한 건만 담으므로(MyApplicationResponse 주석), 신청자 본인이
+            // 닫은 경우만 CANCELLED로 두고 그 외는 "내 신청이 성사되지 않음"인 REJECTED로 묶는다.
+            case CANCELLED -> applicantUserId.equals(closedByUserId) ? "CANCELLED" : "REJECTED";
         };
     }
 }

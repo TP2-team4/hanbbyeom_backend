@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
+import com.team4.hanbbyeom.matching.exception.ApplicantWithdrawnException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
@@ -337,5 +338,60 @@ class MatchDecisionServiceTest {
                 """,
                 activityMatchId
         );
+    }
+
+    // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경한다.
+    private void withdrawUser(Long userId) {
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                userId
+        );
+    }
+
+    // apply()의 "탈퇴한 호스트에게 신청 불가"와 대칭인 케이스. 신청 후 신청자가 탈퇴했는데 호스트가
+    // 수락하면 존재하지 않는 사람과 매칭이 확정되고, 확정된 매칭은 만료 배치로 정리되지 않는다.
+    @Test
+    void 신청자가_탈퇴하면_호스트가_수락할_수_없다() {
+        withdrawUser(applicantUserId);
+
+        assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
+                .isInstanceOf(ApplicantWithdrawnException.class)
+                .hasMessage("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요.");
+
+        // 확정되지 않았고, 호스트 게시글도 MATCHED로 넘어가지 않았다
+        assertThat(activityMatchRepository.findById(activityMatchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.PROPOSED);
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
+    }
+
+    // 수락 불가 메시지가 "거절하면 다시 모집할 수 있다"고 안내하므로, 실제로 거절이 막히지 않아야 한다.
+    @Test
+    void 신청자가_탈퇴해도_호스트는_거절할_수_있고_게시글이_SEARCHING으로_복귀한다() {
+        withdrawUser(applicantUserId);
+
+        matchDecisionService.reject(hostUserId, activityMatchId);
+
+        assertThat(activityMatchRepository.findById(activityMatchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.REJECTED);
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    // 탈퇴 검사가 ensureRespondable() 뒤에 있어야 하는 이유를 고정한다: 이미 확정된 매칭을 그 뒤 신청자가
+    // 탈퇴한 상태로 다시 수락하면, "거절하라"는 (이때는 거짓인) 안내가 아니라 기존 메시지가 나가야 한다.
+    @Test
+    void 이미_확정된_매칭은_신청자가_탈퇴한_뒤에도_기존_메시지로_거부된다() {
+        matchDecisionService.accept(hostUserId, activityMatchId);
+        withdrawUser(applicantUserId);
+
+        assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
+                .isInstanceOf(MatchRequestNotSearchingException.class)
+                .hasMessage("이미 응답했거나 종료된 매칭이에요.");
     }
 }

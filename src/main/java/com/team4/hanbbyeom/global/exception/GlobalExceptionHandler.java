@@ -5,6 +5,7 @@ import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
+import com.team4.hanbbyeom.user.exception.WithdrawPasswordMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -112,6 +113,15 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
+    // MATCHING: 탈퇴한 신청자의 신청을 수락하려는 경우 처리
+    // 수락은 막고 거절은 가능하므로, 호스트가 사유와 다음 행동을 알 수 있게 메시지를 그대로 응답
+    @ExceptionHandler(ApplicantWithdrawnException.class)
+    public ResponseEntity<ErrorResponse> handleApplicantWithdrawn(ApplicantWithdrawnException e) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
     // MATCHING: 매칭 참가자 권한 없음 처리
     @ExceptionHandler(NotMatchParticipantException.class)
     public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {
@@ -160,6 +170,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED) // 인증 자체가 실패한 것이므로 401
                 .body(new ErrorResponse("이메일 또는 비밀번호가 올바르지 않습니다."));
+    }
+
+    // USER: 회원 탈퇴 시 비밀번호 재확인 실패 처리
+    // 토큰은 유효한 상태이므로 로그인 실패(401)와 구분해서 403으로 응답
+    @ExceptionHandler(WithdrawPasswordMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleWithdrawPasswordMismatch(WithdrawPasswordMismatchException e) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse(e.getMessage()));
     }
 
     // SECURITY: 인증 후 리소스 접근 권한 없음 처리

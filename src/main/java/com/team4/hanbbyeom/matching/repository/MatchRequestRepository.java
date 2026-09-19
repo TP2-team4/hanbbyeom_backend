@@ -23,6 +23,8 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     // 닉네임·신뢰도(users, trust_profile)까지 한 번에 조인해서 화면에 필요한 걸 통째로 가져온다
     // — N+1 없이 목록 화면 하나를 한 번의 쿼리로 채우려는 목적. trust_profile은 아직 활동 이력이
     // 없는 신규 유저면 행 자체가 없을 수 있어 LEFT JOIN(없으면 rating/count는 null로 나옴).
+    // 탈퇴한 작성자(users.deleted_at IS NOT NULL)의 글은 제외한다 — 탈퇴 시 닉네임이 NULL로 지워져도
+    // SEARCHING 상태의 모집글은 그대로 남기 때문에, 이 조건이 없으면 닉네임 없는 글이 목록에 노출된다.
     // WHERE절의 파라미터들은 전부 "값이 없으면(:xxx IS NULL) 그 조건은 무시"하는 선택적 필터이고,
     // 거리/페이스는 정확히 일치가 아니라 "게시글의 범위와 필터 범위가 겹치는지"로 판단한다
     // (예: 필터 minDistance=9000인데 게시글이 5000~8000이면 겹치지 않으므로 제외).
@@ -46,6 +48,7 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     LEFT JOIN trust_profile tp ON tp.user_id = mr.user_id
     WHERE mr.status = 'SEARCHING'
       AND mr.activity_type = 'RUN'
+      AND u.deleted_at IS NULL
       AND mr.user_id <> :excludeUserId
       AND (:course IS NULL OR co.name = :course)
       AND (:talkLevel IS NULL OR mr.talk_level = :talkLevel)
