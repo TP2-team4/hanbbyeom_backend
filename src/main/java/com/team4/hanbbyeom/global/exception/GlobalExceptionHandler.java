@@ -1,6 +1,8 @@
 package com.team4.hanbbyeom.global.exception;
 
 import com.team4.hanbbyeom.chat.exception.ChatUnavailableException;
+import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
+import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import com.team4.hanbbyeom.user.exception.WithdrawPasswordMismatchException;
@@ -197,6 +199,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleRunMatchConditionNotFound(RunMatchConditionNotFoundException e) {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // FEEDBACK: 후기/노쇼 신고를 아직 제출할 수 없는 상태 처리
+    // 매칭이 확정된 적 없거나, 확정됐어도 아직 활동 종료 시각(scheduledEndAt)이 지나지 않은 경우
+    @ExceptionHandler(FeedbackNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleFeedbackNotAllowed(FeedbackNotAllowedException e) {
+        return ResponseEntity
+                .badRequest()
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // FEEDBACK: 같은 활동에 대해 후기/신고를 중복 제출 처리
+    // AlreadyHasActiveMatchRequestException과 동일한 이유로 리소스 충돌(409)로 응답
+    @ExceptionHandler(FeedbackAlreadySubmittedException.class)
+    public ResponseEntity<ErrorResponse> handleFeedbackAlreadySubmitted(FeedbackAlreadySubmittedException e) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse(e.getMessage()));
     }
 

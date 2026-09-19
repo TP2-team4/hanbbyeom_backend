@@ -2,16 +2,33 @@ package com.team4.hanbbyeom.matching.repository;
 
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 // activity_match(신청~확정 상태의 매칭 건) 전용 리포지토리.
 public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Long> {
+
+    // feedback 도메인의 후기/노쇼 신고 제출 시 쓰는 비관적 락(SELECT ... FOR UPDATE) 조회.
+    // activity_review와 no_show_report가 서로 다른 테이블이라, 각 테이블 내부의 UNIQUE
+    // 제약("이 활동엔 후기 한 번만"/"이 활동엔 신고 한 번만")만으로는 "이 활동엔 후기든
+    // 신고든 하나만"이라는 두 테이블을 아우르는 규칙을 DB가 보장하지 못한다 — 같은 사용자가
+    // 같은 활동에 후기와 신고를 거의 동시에 보내면 existsBy 체크만으로는 둘 다 통과해 둘 다
+    // 저장될 수 있다. 이 활동 행을 먼저 잠가서 같은 activityMatchId에 대한 두 요청을 강제로
+    // 순서대로 처리하면, 뒤에 처리되는 쪽의 existsBy 체크가 먼저 커밋된 결과를 보고 정확히
+    // 거부할 수 있다 (matching 도메인의 matching_mutex와 같은 목적이지만, 전역 잠금 행 대신
+    // 이 activityMatchId 하나만 잠가서 무관한 다른 매칭의 후기/신고 제출까지 막지 않는다).
+    // (PR #83 리뷰로 발견된 레이스)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM ActivityMatch m WHERE m.id = :id")
+    Optional<ActivityMatch> findByIdForUpdate(@Param("id") Long id);
 
     // 스케줄러(MatchExpireScheduler)가 자동 만료 대상을 찾을 때 쓴다.
     // status=PROPOSED(아직 호스트 응답 대기 중)이면서 decisionExpiresAt이 now보다 과거인 건들.
