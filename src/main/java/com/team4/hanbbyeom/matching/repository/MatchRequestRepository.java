@@ -136,4 +136,36 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getStatus();
         Long getUserId();
     }
+
+    // GET /api/matching/requests (내 모집글 전체 목록)용 조회. findDetailById()와 조인 구조는
+    // 동일하되, 특정 id 하나가 아니라 이 유저가 작성한 모든 상태의 게시글을 최신순으로 가져온다.
+    // 상태 필터링/재매핑은 프론트가 담당하므로 여기서는 status를 그대로 노출한다.
+    @Query(value = """
+        SELECT
+            mr.id AS id,
+            co.name AS courseName,
+            rc.distance_min_meters AS distanceMinMeters,
+            rc.distance_max_meters AS distanceMaxMeters,
+            mr.scheduled_at AS scheduledAt,
+            mr.talk_level AS talkLevel,
+            mr.status AS status
+        FROM match_request mr
+        JOIN run_match_condition rc ON rc.match_request_id = mr.id
+        JOIN running_course co ON co.id = rc.course_id
+        WHERE mr.user_id = :userId
+        ORDER BY mr.created_at DESC, mr.id DESC
+        """, nativeQuery = true)
+    List<MyPostRow> findMyPosts(@Param("userId") Long userId);
+
+    // 위 쿼리 결과 한 행을 매핑하는 프로젝션 — findDetailById()의 MatchRequestDetailRow와
+    // 같은 패턴(SELECT의 AS 별칭과 getter 이름이 대응).
+    interface MyPostRow {
+        Long getId();
+        String getCourseName();
+        Integer getDistanceMinMeters();
+        Integer getDistanceMaxMeters();
+        Instant getScheduledAt();
+        String getTalkLevel();
+        String getStatus();
+    }
 }

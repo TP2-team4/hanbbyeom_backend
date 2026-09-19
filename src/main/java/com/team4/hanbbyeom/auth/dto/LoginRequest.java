@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.dto;
 
+import com.team4.hanbbyeom.global.validation.Utf8ByteLength;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -20,7 +21,11 @@ public record LoginRequest(
         // 회원가입 시점의 최소 비밀번호 길이 정책을 다시 검증하지 않음
         // → 정책이 8자에서 12자로 바뀌어도, 이미 8자로 가입한 사용자는 로그인할 수 있어야 함
         @NotBlank
-        @Schema(description = "가입할 때 설정한 비밀번호", format = "password",
+        @Utf8ByteLength(
+                max = 72,
+                message = "비밀번호가 허용 길이를 초과했습니다. 더 짧게 작성해주세요."
+        )
+        @Schema(description = "가입할 때 설정한 비밀번호 (UTF-8 기준 72바이트 이하)", format = "password",
                 example = "password1234")
         String password
 ) {

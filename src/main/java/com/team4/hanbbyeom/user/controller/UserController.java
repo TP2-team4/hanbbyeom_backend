@@ -1,6 +1,8 @@
 package com.team4.hanbbyeom.user.controller;
 
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
+import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;
 import com.team4.hanbbyeom.user.dto.UserPreferencesUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserResponse;
@@ -26,10 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final TrustProfileLookupService trustProfileLookupService;
 
     // 설정 변경에는 DB에서 관리 중인 User Entity가 필요하므로 UserService를 통해 처리
-    public UserController(UserService userService) {
+    public UserController(UserService userService, TrustProfileLookupService trustProfileLookupService) {
         this.userService = userService;
+        this.trustProfileLookupService = trustProfileLookupService;
     }
 
     // 내 정보 조회: GET /api/users/me
@@ -75,5 +79,20 @@ public class UserController {
                 .updatePreferences(principal.getUserId(), request);
 
         return ResponseEntity.ok(response);
+    }
+
+    // 내 신뢰도 프로필 조회: GET /api/users/me/trust-profile
+    // 실제 조회 로직은 TrustProfileLookupService가 이미 갖고 있다 — 지금까지는
+    // 호스트/신청자 프로필 조회(다른 사람 대상)에서만 쓰였는데, 본인 조회용 경로가 없었다.
+    @Operation(
+            summary = "내 신뢰도 프로필 조회",
+            description = "인증된 사용자 본인의 평균 별점·완료한 활동·노쇼 신고 횟수를 조회합니다. "
+                    + "활동 이력이 전혀 없으면 기본값(0, null)이 반환됩니다."
+    )
+    @GetMapping("/me/trust-profile")
+    public ResponseEntity<TrustProfileResponse> myTrustProfile(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return ResponseEntity.ok(trustProfileLookupService.lookup(principal.getUserId()));
     }
 }
