@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.dto;
 
+import com.team4.hanbbyeom.global.validation.Utf8ByteLength;
 import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
@@ -26,6 +27,10 @@ public record SignUpRequest(
 
         @NotBlank
         @Size(min = 8, max = 64)
+        @Utf8ByteLength(
+                max = 72,
+                message = "비밀번호가 허용 길이를 초과했습니다. 더 짧게 작성해주세요."
+        )
         @Schema(description = "비밀번호 (8자 이상 64자 이하, UTF-8 기준 72바이트 이하)", format = "password",
                 example = "password1234")
         String password,
