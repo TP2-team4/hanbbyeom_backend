@@ -73,11 +73,13 @@ class ChatListIntegrationTest {
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].activityMatchId").value(endedMatchId))
                 .andExpect(jsonPath("$[0].counterpartUserId").value(endedCounterpartId))
+                .andExpect(jsonPath("$[0].counterpartNickname").value("종료매칭상대"))
                 .andExpect(jsonPath("$[0].status").value("ENDED"))
                 .andExpect(jsonPath("$[0].lastMessage").value("조심히 들어가세요."))
                 .andExpect(jsonPath("$[0].lastMessageAt").isNotEmpty())
                 .andExpect(jsonPath("$[1].activityMatchId").value(currentMatchId))
                 .andExpect(jsonPath("$[1].counterpartUserId").value(currentCounterpartId))
+                .andExpect(jsonPath("$[1].counterpartNickname").value("현재매칭상대"))
                 .andExpect(jsonPath("$[1].status").value("CONFIRMED"))
                 .andExpect(jsonPath("$[1].lastMessage").isEmpty())
                 .andExpect(jsonPath("$[1].lastMessageAt").isEmpty());
@@ -130,11 +132,68 @@ class ChatListIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.activityMatchId").value(activityMatchId))
                 .andExpect(jsonPath("$.counterpartUserId").value(applicantId))
+                .andExpect(jsonPath("$.counterpartNickname").value("상세신청자"))
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.courseName").value("반포 한강공원"))
                 .andExpect(jsonPath("$.location").value("고속터미널역 8-1번 출구"))
                 .andExpect(jsonPath("$.scheduledAt").isNotEmpty())
                 .andExpect(jsonPath("$.scheduledEndAt").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("상대가 탈퇴하면 채팅 목록의 닉네임은 null이고 ID는 유지")
+    void 탈퇴_상대_닉네임_null_반환() throws Exception {
+        Long currentUserId = createUser("현재사용자");
+        Long counterpartId = createUser("탈퇴할상대");
+        OffsetDateTime now = OffsetDateTime.now();
+
+        Long activityMatchId = createMatch(
+                currentUserId,
+                counterpartId,
+                ActivityMatchStatus.CONFIRMED,
+                "여의도 한강공원",
+                "여의나루역 2번 출구",
+                now.minusHours(3),
+                now.plusHours(1),
+                now.plusHours(2)
+        );
+
+        withdrawUser(counterpartId);
+
+        mockMvc.perform(get("/api/chats")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(currentUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].activityMatchId").value(activityMatchId))
+                .andExpect(jsonPath("$[0].counterpartUserId").value(counterpartId))
+                .andExpect(jsonPath("$[0].counterpartNickname").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("상대가 탈퇴하면 매칭 상세의 닉네임은 null이고 ID는 유지")
+    void 탈퇴_상대_매칭_상세_닉네임_null_반환() throws Exception {
+        Long hostId = createUser("상세호스트");
+        Long applicantId = createUser("탈퇴할신청자");
+        OffsetDateTime now = OffsetDateTime.now();
+
+        Long activityMatchId = createMatch(
+                hostId,
+                applicantId,
+                ActivityMatchStatus.CONFIRMED,
+                "반포 한강공원",
+                "고속터미널역 8-1번 출구",
+                now.minusMinutes(30),
+                now.plusHours(1),
+                now.plusHours(2)
+        );
+
+        withdrawUser(applicantId);
+
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(hostId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.counterpartUserId").value(applicantId))
+                .andExpect(jsonPath("$.counterpartNickname").doesNotExist());
     }
 
     @Test
@@ -160,6 +219,20 @@ class ChatListIntegrationTest {
                 "chat-list-" + System.nanoTime() + "@example.com",
                 nickname,
                 OffsetDateTime.now()
+        );
+    }
+
+    // 탈퇴 처리: users 행은 남기고 개인정보 필드만 NULL로 지우는 소프트 딜리트
+    private void withdrawUser(Long userId) {
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    default_talk_level = NULL, email_verified_at = NULL, deleted_at = ?
+                WHERE id = ?
+                """,
+                OffsetDateTime.now(),
+                userId
         );
     }
 

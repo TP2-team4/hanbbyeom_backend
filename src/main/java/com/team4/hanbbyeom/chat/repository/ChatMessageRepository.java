@@ -23,11 +23,13 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     );
 
     // 채팅 목록 화면에 필요한 매칭 정보와 최근 메시지를 한 번의 쿼리로 조회
-    // released_at 조건을 사용하지 않아 종료된 매칭도 남기고, 메시지가 없으면 confirmed_at을
-    // 정렬 기준으로 사용한다. LATERAL 조회는 매칭별 최근 메시지 1건만 가져오기 위한 용도다.
+    // released_at 조건 사용 X: 종료된 매칭도 채팅 확인 가능, 메시지가 없으면 confirmed_at을 정렬 기준으로 사용
+    // LATERAL 조회는 매칭별 최근 메시지 1건만 가져오기 위한 용도
+    // 탈퇴해도 users 행은 남고 nickname만 NULL이 되므로 LEFT JOIN 대신 JOIN 사용
     @Query(value = """
             SELECT am.id AS activityMatchId,
                    other.user_id AS counterpartUserId,
+                   u.nickname AS counterpartNickname,
                    am.status AS status,
                    am.course_name AS courseName,
                    am.location AS location,
@@ -40,6 +42,7 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             JOIN match_participant other
               ON other.activity_match_id = am.id
              AND other.user_id <> :currentUserId
+            JOIN users u ON u.id = other.user_id
             LEFT JOIN LATERAL (
                 SELECT cm.content, cm.created_at
                 FROM chat_message cm
@@ -57,6 +60,7 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     interface ChatListRow {
         Long getActivityMatchId();
         Long getCounterpartUserId();
+        String getCounterpartNickname();
         String getStatus();
         String getCourseName();
         String getLocation();

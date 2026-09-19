@@ -40,6 +40,7 @@ public class ChatMessageService {
                 .map(row -> new ChatListItemResponse(
                         row.getActivityMatchId(),
                         row.getCounterpartUserId(),
+                        row.getCounterpartNickname(),
                         row.getStatus(),
                         row.getCourseName(),
                         row.getLocation(),
