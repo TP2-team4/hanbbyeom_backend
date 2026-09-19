@@ -210,7 +210,7 @@ class PasswordResetServiceTest {
         // 과거 기록을 포함한 PASSWORD_RESET 인증 기록 전체 삭제 확인
         assertTrue(
                 emailVerificationRepository
-                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                                 email,
                                 VerificationPurpose.PASSWORD_RESET
                         )

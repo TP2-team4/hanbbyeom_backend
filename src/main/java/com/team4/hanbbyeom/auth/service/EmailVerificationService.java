@@ -120,7 +120,7 @@ public class EmailVerificationService {
 
         // 이메일+목적으로 가장 최근에 생성된 인증 기록만 유효한 확인 대상으로 조회
         EmailVerification verification = emailVerificationRepository
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(email, purpose)
                 .orElseThrow(() -> new IllegalStateException("인증 코드 발송 내역이 없습니다. 인증 코드를 먼저 요청해주세요."));
 
         // 이미 인증에 성공해 사용 완료된 코드인지 확인 (일회성 사용 보장)
@@ -162,7 +162,7 @@ public class EmailVerificationService {
 
         return emailVerificationRepository
                 // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증 기록 1개를 가져옴
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(email, purpose)
                 // Optional 안에 EmailVerification 객체가 있다면 꺼내서 boolean 값으로 변환
                 .map(verification
                         // 인증 완료 시간이 있는지 조회
@@ -179,7 +179,7 @@ public class EmailVerificationService {
 
         return emailVerificationRepository
                 // 같은 이메일 + 같은 인증 목적 중에서 가장 최근에 생성된 인증기록 1개를 가져옴(optional)
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                         email,
                         purpose
                 )
@@ -247,7 +247,7 @@ public class EmailVerificationService {
     // 같은 이메일로 같은 목적의 인증 코드를 다시 보낼 수 있는지 (최근 발송 시각 기준 재발송 가능 여부) 확인
     private boolean isResendAllowed(String email, VerificationPurpose purpose) {
         return emailVerificationRepository
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(email, purpose)
                 // 최근 발송 기록이 있으면 60초 경과 여부 확인
                 .map(latest -> {
                     Instant nextAllowedAt = latest.getCreatedAt().plus(RESEND_INTERVAL);

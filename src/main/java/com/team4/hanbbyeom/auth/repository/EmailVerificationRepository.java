@@ -19,9 +19,9 @@ public interface EmailVerificationRepository extends JpaRepository<EmailVerifica
     // SELECT 대상: EmailVerification
     // WHERE email = :email
     //   AND purpose = :purpose
-    // ORDER BY created_at DESC
+    // ORDER BY created_at DESC, id DESC
     // 조건을 만족하는 가장 최근 인증 요청 1건을 Optional로 반환
-    Optional<EmailVerification> findTopByEmailAndPurposeOrderByCreatedAtDesc(
+    Optional<EmailVerification> findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
             String email,
             VerificationPurpose purpose
     );

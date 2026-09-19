@@ -124,7 +124,7 @@ class EmailVerificationServiceTest {
         // DB에 인증 기록이 저장됐는지 확인
         assertTrue(
                 emailVerificationRepository
-                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                                 email,
                                 VerificationPurpose.SIGNUP
                         )
@@ -149,7 +149,7 @@ class EmailVerificationServiceTest {
         // PASSWORD_RESET 인증 기록 저장과 실제 메일 발송 확인
         assertTrue(
                 emailVerificationRepository
-                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                                 email,
                                 VerificationPurpose.PASSWORD_RESET
                         )
@@ -172,7 +172,7 @@ class EmailVerificationServiceTest {
         // 불필요한 인증 기록과 외부 메일 발송의 미생성 확인
         assertFalse(
                 emailVerificationRepository
-                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                                 email,
                                 VerificationPurpose.PASSWORD_RESET
                         )
@@ -192,7 +192,7 @@ class EmailVerificationServiceTest {
                 VerificationPurpose.PASSWORD_RESET
         );
         EmailVerification firstVerification = emailVerificationRepository
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                         email,
                         VerificationPurpose.PASSWORD_RESET
                 )
@@ -205,7 +205,7 @@ class EmailVerificationServiceTest {
         );
 
         EmailVerification latestVerification = emailVerificationRepository
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                         email,
                         VerificationPurpose.PASSWORD_RESET
                 )
@@ -339,7 +339,7 @@ class EmailVerificationServiceTest {
 
         // 틀린 시도 1회가 attemptCount에 기록됐는지 확인
         EmailVerification saved = emailVerificationRepository
-                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(
                         email,
                         VerificationPurpose.SIGNUP
                 )
