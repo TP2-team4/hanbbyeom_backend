@@ -109,6 +109,40 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("닉네임이 2~16자 규칙을 어기거나 공백뿐이면 한글 메시지와 함께 400")
+    void signUp_닉네임_검증_실패는_한글_메시지로_400() throws Exception {
+        // 검증은 Controller 단계에서 끝나므로 이메일 인증 데이터는 준비하지 않음
+        String sizeMessage = "닉네임은 2자 이상 16자 이하로 입력해주세요.";
+
+        for (String nickname : new String[]{"가", "가".repeat(17)}) {
+            mockMvc.perform(post("/api/auth/signup")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(signUpBody(nickname)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(sizeMessage));
+        }
+
+        // 3칸 공백: 길이 규칙은 통과하지만 공백뿐이라 NotBlank에 걸린다
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signUpBody("   ")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("닉네임을 입력해주세요."));
+    }
+
+    // 닉네임만 바꿔 끼우는 가입 요청 바디 (나머지 필드는 검증을 통과하는 값)
+    private String signUpBody(String nickname) {
+        return """
+                {
+                  "email": "runner@example.com",
+                  "password": "test1234",
+                  "nickname": "%s",
+                  "defaultTalkLevel": "SILENT"
+                }
+                """.formatted(nickname);
+    }
+
+    @Test
     @DisplayName("기본 대화 수준이 누락된 회원가입 요청은 400")
     void signUp_기본_대화_수준_누락_거부() throws Exception {
         // defaultTalkLevel을 보내지 않으면 @NotNull 검증에서 Service 호출 전에 400으로 차단

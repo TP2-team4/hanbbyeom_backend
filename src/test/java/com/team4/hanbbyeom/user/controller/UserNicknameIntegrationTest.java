@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -28,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -162,6 +164,34 @@ class UserNicknameIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(storedNickname(user.getId())).isEqualTo("기존닉네임");
+    }
+
+    // "가입과 같은 규칙"이 길이만이 아니라 사용자가 보는 메시지까지 성립하는지 두 API의 응답을 직접 비교한다.
+    // 가입과 변경이 서로 다른 DTO라 한쪽만 고치면 다시 어긋날 수 있는데, 이 테스트가 그것을 잡는다.
+    @Test
+    @DisplayName("닉네임 검증 실패 메시지가 회원가입과 같다")
+    void 검증_메시지가_회원가입과_같다() throws Exception {
+        User user = createUser("기존닉네임");
+
+        for (String nickname : new String[]{"가", "가".repeat(17), "   "}) {
+            String signUpMessage = mockMvc.perform(post("/api/auth/signup")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "email": "runner@example.com",
+                                      "password": "test1234",
+                                      "nickname": "%s",
+                                      "defaultTalkLevel": "SILENT"
+                                    }
+                                    """.formatted(nickname)))
+                    .andExpect(status().isBadRequest())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            String changeMessage = changeNickname(bearerToken(user.getId()), nickname)
+                    .andExpect(status().isBadRequest())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+            assertThat(changeMessage).isEqualTo(signUpMessage);
+        }
     }
 
     @Test
