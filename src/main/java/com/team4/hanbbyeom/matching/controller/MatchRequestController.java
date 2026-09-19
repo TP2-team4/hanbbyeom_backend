@@ -112,7 +112,10 @@ public class MatchRequestController {
     // MatchRequestBoardController.cancelApplication)와는 다른 기능이니 헷갈리지 말 것.
     // 요청/응답 바디 없음.
     @Operation(summary = "모집글 취소",
-            description = "게시글 상태를 CANCELLED로 변경해 모집 탭에서 내립니다. 아래 신청 취소 API와는 다른 기능입니다.")
+            description = "게시글 상태를 CANCELLED로 변경해 모집 탭에서 내립니다. 모집 중(SEARCHING)인 게시글만 취소할 수 있으며, "
+                    + "신청이 진행 중(PENDING_CONFIRMATION)이거나 확정(MATCHED)되었거나 이미 마감·취소된 게시글은 409입니다. "
+                    + "신청이 진행 중이면 먼저 신청을 거절(POST /api/matching/matches/{id}/reject)하면 취소할 수 있습니다. "
+                    + "아래 신청 취소 API와는 다른 기능입니다.")
     @PostMapping("/{id}/cancel")
     public ResponseEntity<Void> cancel(
             @PathVariable Long id,
