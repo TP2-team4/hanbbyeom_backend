@@ -194,11 +194,13 @@ public class ActivityFeedbackService {
     // 거의 동시에 후기가 들어오는" 경우에도 PK 충돌(UPDATE 0행 → 두 트랜잭션 모두 INSERT 시도)이
     // 생기지 않는다 (PR #83 리뷰로 발견된 레이스).
     //
-    // completed_activity_count는 일부러 안 건드린다 — "상대가 후기를 써줄 때만 오른다"는
-    // 지금 정의로 값을 쌓기 시작하면, 후기 작성률이 100%가 아닌 이상 구조적으로 실제보다
-    // 적게 집계되고, 이미 모집 탭 목록/호스트·신청자 프로필/마이페이지 세 곳에 노출되는 값이라
-    // 나중에 "활동 종료 시점 기준"으로 재정의할 때 과거 데이터 소급 보정이 필요해진다.
-    // 정의가 확정되기 전까지는 컬럼 기본값 0(= "아직 미구현")으로 남겨둔다 (후속 이슈, PR #83 리뷰).
+    // average_rating은 후기가 하나도 없는 행에서는 NULL이다(V16). 그 행에 첫 후기가 들어오면 기존 평균이
+    // NULL이라 "NULL * 0"이 NULL이 되어 새 평균도 NULL이 되므로, COALESCE로 0으로 취급해 계산한다
+    // (review_count가 0이라 곱은 어차피 0이다).
+    //
+    // completed_activity_count는 후기 작성과 무관하게 활동이 ENDED로 전환될 때 두 참가자 모두 +1로 집계한다
+    // (MatchDecisionService, 이슈 #96). "상대가 후기를 써줄 때만 오른다"는 예전 정의는 후기 작성률만큼 구조적으로
+    // 과소집계되어 PR #83 리뷰에서 보류되었고, 활동 종료 시점 기준으로 확정되었다. 그래서 여기서는 건드리지 않는다.
     private void applyReviewToTrustProfile(Long userId, Integer rating, TalkLevel talkLevel) {
         boolean isSilent = talkLevel == TalkLevel.SILENT;
 
@@ -209,7 +211,7 @@ public class ActivityFeedbackService {
                 VALUES (?, ?, 1, 1)
                 ON CONFLICT (user_id) DO UPDATE SET
                     average_rating = ROUND(
-                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
+                        (COALESCE(trust_profile.average_rating, 0) * trust_profile.review_count + EXCLUDED.average_rating)
                         / (trust_profile.review_count + 1), 1),
                     review_count = trust_profile.review_count + 1,
                     review_silent_vote_count = trust_profile.review_silent_vote_count + 1,
@@ -222,7 +224,7 @@ public class ActivityFeedbackService {
                 VALUES (?, ?, 1, 1)
                 ON CONFLICT (user_id) DO UPDATE SET
                     average_rating = ROUND(
-                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
+                        (COALESCE(trust_profile.average_rating, 0) * trust_profile.review_count + EXCLUDED.average_rating)
                         / (trust_profile.review_count + 1), 1),
                     review_count = trust_profile.review_count + 1,
                     review_light_chat_vote_count = trust_profile.review_light_chat_vote_count + 1,
@@ -231,8 +233,9 @@ public class ActivityFeedbackService {
         }
     }
 
-    // 노쇼 신고 결과를 trust_profile에 반영 — completed_activity_count는 올리지 않는다
-    // (실제로 못 만났다는 신고니까 "완료한 활동"으로 칠 수 없음).
+    // 노쇼 신고 결과를 trust_profile에 반영 — completed_activity_count는 올리지도 내리지도 않는다.
+    // 완료한 활동은 활동 종료 시점에 이미 집계되었고, 신고는 그 뒤(종료 시각 이후)에 접수되므로 차감 시점이
+    // 불명확하다. 노쇼는 no_show_report_count로 따로 표현된다(이슈 #96 결정 사항).
     // applyReviewToTrustProfile()과 동일한 이유로 upsert 사용.
     private void incrementNoShowCount(Long userId) {
         jdbcTemplate.update("""
