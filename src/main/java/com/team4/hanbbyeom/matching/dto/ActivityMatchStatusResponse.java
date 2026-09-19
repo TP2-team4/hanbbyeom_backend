@@ -15,6 +15,7 @@ public record ActivityMatchStatusResponse(
         OffsetDateTime confirmedAt, // CONFIRMED일 때만
         OffsetDateTime closedAt, // REJECTED/EXPIRED/ENDED일 때만
         Long counterpartUserId,
+        String counterpartNickname, // 상대가 탈퇴한 경우 null, 표시 문구는 클라이언트에서 결정
         String courseName,
         String location,
         OffsetDateTime scheduledAt,

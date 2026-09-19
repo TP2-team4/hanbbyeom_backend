@@ -71,6 +71,12 @@ public class ActivityMatchController {
                 .findFirst()
                 .orElse(null);
 
+        // 아직 신청자가 없는 매칭은 상대가 없으므로 조회 생략
+        String counterpartNickname = counterpartUserId == null
+                ? null
+                : matchParticipantRepository
+                        .findNicknameByActivityMatchIdAndUserId(activityMatchId, counterpartUserId);
+
         return new ActivityMatchStatusResponse(
                 activityMatch.getId(),
                 activityMatch.getStatus().name(),
@@ -78,6 +84,7 @@ public class ActivityMatchController {
                 activityMatch.getConfirmedAt(),
                 activityMatch.getClosedAt(),
                 counterpartUserId,
+                counterpartNickname,
                 activityMatch.getCourseName(),
                 activityMatch.getLocation(),
                 activityMatch.getScheduledAt(),

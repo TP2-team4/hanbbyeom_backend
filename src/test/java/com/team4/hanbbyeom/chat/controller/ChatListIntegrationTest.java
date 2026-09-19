@@ -132,6 +132,7 @@ class ChatListIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.activityMatchId").value(activityMatchId))
                 .andExpect(jsonPath("$.counterpartUserId").value(applicantId))
+                .andExpect(jsonPath("$.counterpartNickname").value("상세신청자"))
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.courseName").value("반포 한강공원"))
                 .andExpect(jsonPath("$.location").value("고속터미널역 8-1번 출구"))
@@ -166,6 +167,33 @@ class ChatListIntegrationTest {
                 .andExpect(jsonPath("$[0].activityMatchId").value(activityMatchId))
                 .andExpect(jsonPath("$[0].counterpartUserId").value(counterpartId))
                 .andExpect(jsonPath("$[0].counterpartNickname").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("상대가 탈퇴하면 매칭 상세의 닉네임은 null이고 ID는 유지")
+    void 탈퇴_상대_매칭_상세_닉네임_null_반환() throws Exception {
+        Long hostId = createUser("상세호스트");
+        Long applicantId = createUser("탈퇴할신청자");
+        OffsetDateTime now = OffsetDateTime.now();
+
+        Long activityMatchId = createMatch(
+                hostId,
+                applicantId,
+                ActivityMatchStatus.CONFIRMED,
+                "반포 한강공원",
+                "고속터미널역 8-1번 출구",
+                now.minusMinutes(30),
+                now.plusHours(1),
+                now.plusHours(2)
+        );
+
+        withdrawUser(applicantId);
+
+        mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(hostId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.counterpartUserId").value(applicantId))
+                .andExpect(jsonPath("$.counterpartNickname").doesNotExist());
     }
 
     @Test
