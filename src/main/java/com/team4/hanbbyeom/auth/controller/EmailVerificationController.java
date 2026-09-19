@@ -32,7 +32,8 @@ public class EmailVerificationController {
     // 인증 코드 발송 요청: POST /api/auth/email-verifications
     @Operation(
             summary = "이메일 인증 코드 발송",
-            description = "이메일과 인증 목적을 받아 인증 코드를 발송합니다."
+            description = "이메일과 인증 목적을 받아 인증 코드를 발송합니다. "
+                    + "PASSWORD_RESET은 가입 여부 비노출을 위해 미가입·재발송 제한 요청도 200을 반환합니다(메일만 생략)."
     )
     @PostMapping
     public ResponseEntity<Void> send(@Valid @RequestBody EmailVerificationSendRequest request) {

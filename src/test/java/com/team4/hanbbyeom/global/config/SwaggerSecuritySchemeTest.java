@@ -86,6 +86,13 @@ class SwaggerSecuritySchemeTest {
                 .andExpect(jsonPath(
                         "$.paths['/api/auth/email-verifications/confirm'].post.security").doesNotExist())
 
+                // 비밀번호 재설정도 로그인 전 호출하는 공개 API로 표시되어야 함
+                .andExpect(jsonPath("$.paths['/api/auth/password-reset'].post").exists())
+                .andExpect(jsonPath(
+                        "$.paths['/api/auth/password-reset'].post.security").doesNotExist())
+                .andExpect(jsonPath(
+                        "$.paths['/api/auth/password-reset'].post.responses['204']").exists())
+
                 // 공개 데이터인 러닝 코스 목록 조회도 동일
                 .andExpect(jsonPath("$.paths['/api/run/courses'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/run/courses'].get.security").doesNotExist());
@@ -104,6 +111,8 @@ class SwaggerSecuritySchemeTest {
                         "$.components.schemas.EmailVerificationSendRequest.description").exists())
                 .andExpect(jsonPath(
                         "$.components.schemas.EmailVerificationConfirmRequest.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.description").exists())
                 // 응답 DTO 3개
                 .andExpect(jsonPath("$.components.schemas.SignUpResponse.description").exists())
                 .andExpect(jsonPath("$.components.schemas.LoginResponse.description").exists())
@@ -128,6 +137,22 @@ class SwaggerSecuritySchemeTest {
                         "$.components.schemas.LoginRequest.properties.password.minLength").value(1))
                 .andExpect(jsonPath(
                         "$.components.schemas.LoginRequest.properties.password.description")
+                        .value(containsString("UTF-8 기준 72바이트 이하")))
+
+                // 비밀번호 재설정에도 회원가입과 같은 비밀번호 제약이 표시되는지 확인
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.properties.code.description").exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.properties.newPassword.format")
+                        .value("password"))
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.properties.newPassword.minLength")
+                        .value(8))
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.properties.newPassword.maxLength")
+                        .value(64))
+                .andExpect(jsonPath(
+                        "$.components.schemas.PasswordResetRequest.properties.newPassword.description")
                         .value(containsString("UTF-8 기준 72바이트 이하")))
 
                 // 프론트엔드가 회원가입 요청에 보낼 필드의 의미와 허용값을 문서만 보고 알 수 있는지 확인
