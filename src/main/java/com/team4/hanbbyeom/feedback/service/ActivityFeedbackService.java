@@ -22,6 +22,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -38,17 +39,22 @@ public class ActivityFeedbackService {
     // trust_profile은 JPA 엔티티가 없고(매칭 도메인이 임시로 만든 테이블) 지금까지 계속
     // JdbcTemplate으로 직접 SQL을 다뤄왔으므로(TrustProfileLookupService 참고) 동일하게 사용
     private final JdbcTemplate jdbcTemplate;
+    // "활동이 끝났는지" 판정은 TimeConfig의 Clock 빈으로만 한다 — 경계 시각(now == scheduledEndAt)
+    // 테스트를 시계 고정으로 쓸 수 있게 하기 위함 (채팅 도메인과 동일한 방식, #94)
+    private final Clock clock;
 
     public ActivityFeedbackService(ActivityMatchRepository activityMatchRepository,
                                    MatchParticipantRepository matchParticipantRepository,
                                    ActivityReviewRepository activityReviewRepository,
                                    NoShowReportRepository noShowReportRepository,
-                                   JdbcTemplate jdbcTemplate) {
+                                   JdbcTemplate jdbcTemplate,
+                                   Clock clock) {
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.activityReviewRepository = activityReviewRepository;
         this.noShowReportRepository = noShowReportRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 활동 후기 작성.
@@ -132,7 +138,7 @@ public class ActivityFeedbackService {
 
         boolean wasConfirmed = activityMatch.getStatus() == ActivityMatchStatus.CONFIRMED
                 || activityMatch.getStatus() == ActivityMatchStatus.ENDED;
-        boolean activityEnded = !OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt());
+        boolean activityEnded = !OffsetDateTime.now(clock).isBefore(activityMatch.getScheduledEndAt());
 
         boolean canSubmit = wasConfirmed && activityEnded && !alreadySubmitted;
 
@@ -170,7 +176,7 @@ public class ActivityFeedbackService {
             throw new NotMatchParticipantException("본인이 참여한 매칭만 가능해요.");
         }
 
-        if (OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt())) {
+        if (OffsetDateTime.now(clock).isBefore(activityMatch.getScheduledEndAt())) {
             throw new FeedbackNotAllowedException("아직 활동이 끝나지 않았어요.");
         }
 
