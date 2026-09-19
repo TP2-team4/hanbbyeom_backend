@@ -284,7 +284,8 @@ feat: 기본 대화 수준 변경 기능 추가 (#60)
 * Database: PostgreSQL (Docker 컨테이너)
 * Domain: DuckDNS
 * Reverse Proxy: Caddy (HTTPS 인증서 자동 발급 및 갱신)
-* CI: GitHub Actions (PR 및 `dev`, `main` Push 시 빌드와 테스트)
+* CI/CD: GitHub Actions (PR 및 `dev`, `main` Push 시 빌드·테스트, `main` Push 시 Docker 이미지 발행)
+* Deployment: EC2에서 Docker Compose를 이용한 수동 반영
 
 ### 서비스 주소
 
