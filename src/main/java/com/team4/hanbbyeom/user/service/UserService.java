@@ -3,6 +3,8 @@ package com.team4.hanbbyeom.user.service;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.user.domain.User;
+import com.team4.hanbbyeom.user.dto.UserNicknameResponse;
+import com.team4.hanbbyeom.user.dto.UserNicknameUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;
 import com.team4.hanbbyeom.user.dto.UserPreferencesUpdateRequest;
 import com.team4.hanbbyeom.user.exception.WithdrawPasswordMismatchException;
@@ -40,6 +42,20 @@ public class UserService {
 
         // from: User Entity를 UserPreferencesResponse DTO로 변환
         return UserPreferencesResponse.from(user);
+    }
+
+    // 닉네임 변경: 현재 사용자의 닉네임만 수정한다. 닉네임은 users.nickname을 직접 조회해서 보여주므로
+    // (모집 목록·상세·신청 내역·활동 이력 등) 다른 테이블을 함께 갱신할 필요가 없다.
+    @Transactional
+    public UserNicknameResponse updateNickname(Long userId, UserNicknameUpdateRequest request) {
+        // DB에 변경을 저장할 User를 다시 조회 (탈퇴한 사용자는 제외)
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new IllegalStateException("사용자 정보를 찾을 수 없습니다."));
+
+        // 트랜잭션 안에서 조회한 Entity이므로 별도 save() 없이 Dirty Checking으로 UPDATE 실행
+        user.changeNickname(request.nickname());
+
+        return UserNicknameResponse.from(user);
     }
 
     // 회원 탈퇴 — 본인 비밀번호를 다시 확인한 뒤, 진행 중인 매칭과 모집 중인 게시글을 정리하고,

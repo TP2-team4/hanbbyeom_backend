@@ -3,6 +3,8 @@ package com.team4.hanbbyeom.user.controller;
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import com.team4.hanbbyeom.user.dto.UserNicknameResponse;
+import com.team4.hanbbyeom.user.dto.UserNicknameUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;
 import com.team4.hanbbyeom.user.dto.UserPreferencesUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserResponse;
@@ -74,6 +76,26 @@ public class UserController {
         // 현재 인증된 사용자의 ID로 설정 변경
         UserPreferencesResponse response = userService
                 .updatePreferences(principal.getUserId(), request);
+
+        return ResponseEntity.ok(response);
+    }
+
+    // 닉네임 변경: PATCH /api/users/me/nickname
+    @Operation(
+            summary = "닉네임 변경",
+            description = "인증된 사용자 본인의 닉네임을 변경합니다. 회원가입과 같은 규칙(2자 이상 16자 이하)이 적용되며 "
+                    + "다른 사용자와 중복될 수 있습니다. 변경된 닉네임은 모집 목록·상세, 신청 내역, 활동 이력 등 "
+                    + "닉네임이 표시되는 모든 곳에 바로 반영됩니다."
+    )
+    @PatchMapping("/me/nickname")
+    public ResponseEntity<UserNicknameResponse> updateNickname(
+            // @Valid: 요청 DTO의 @NotBlank·@Size 검증을 실행해 잘못된 값을 Service 호출 전에 차단
+            @Valid @RequestBody UserNicknameUpdateRequest request,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        // 현재 인증된 사용자의 ID로 닉네임 변경 (다른 사용자의 닉네임은 변경할 수 없음)
+        UserNicknameResponse response = userService
+                .updateNickname(principal.getUserId(), request);
 
         return ResponseEntity.ok(response);
     }
