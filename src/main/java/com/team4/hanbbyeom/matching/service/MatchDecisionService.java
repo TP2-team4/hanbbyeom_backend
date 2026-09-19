@@ -66,6 +66,20 @@ public class MatchDecisionService {
         //    사이) 수락을 막는다 — 안 그러면 기한 지난 매칭이 수락돼 CONFIRMED가 될 수 있음.
         ensureRespondable(activityMatch);
 
+        // 탈퇴한 신청자와 매칭을 확정하면 호스트는 나타나지 않을 상대와 약속을 갖게 되고, 확정된
+        // 매칭은 expireOverdue()로 정리되지 않아 잘못된 확정 데이터가 남는다. apply()의 호스트 탈퇴
+        // 검사와 대칭이다(users는 matching 도메인이 직접 참조하지 않으므로 jdbcTemplate으로 조회).
+        // ensureRespondable() 뒤에 두는 이유: 이미 응답했거나 종료된 매칭에는 그 메시지가 나가야 하고,
+        // 아래 안내("거절하면 다시 모집")는 아직 응답 가능한 매칭에서만 사실이기 때문이다.
+        // reject()에는 같은 검사를 두지 않는다 — 거절은 게시글을 SEARCHING으로 되돌리는 호스트의 탈출구다.
+        Boolean applicantWithdrawn = jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM users WHERE id = ?",
+                Boolean.class, applicant.getUserId()
+        );
+        if (Boolean.TRUE.equals(applicantWithdrawn)) {
+            throw new MatchRequestNotSearchingException("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요.");
+        }
+
         // 5) 호스트 참여 상태 ACCEPTED로, activity_match를 CONFIRMED로 전이하며 현장 확인 코드 발급
         host.accept();
         String meetingCode = generateMeetingCode();
