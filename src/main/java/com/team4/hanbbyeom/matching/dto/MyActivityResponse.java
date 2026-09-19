@@ -33,6 +33,13 @@ public record MyActivityResponse(
                 example = "ENDED", allowableValues = {"CONFIRMED", "ENDED", "CANCELLED"})
         String status,
 
+        @Schema(description = "취소 주체. status가 CANCELLED일 때만 값이 있고 그 외에는 null. "
+                + "ME는 내가 취소, COUNTERPART는 상대가 직접 취소, SYSTEM은 사용자의 직접 행동이 아닌 시스템 처리입니다"
+                + "(현재 CANCELLED는 상대의 회원 탈퇴로 시스템이 취소하는 경우뿐이라 SYSTEM만 내려옵니다). "
+                + "프론트는 counterpartNickname이 null인지로 취소 사유를 추론하지 말고 이 값을 사용하세요",
+                example = "SYSTEM", allowableValues = {"ME", "COUNTERPART", "SYSTEM"}, nullable = true)
+        String cancelledBy,
+
         @Schema(description = "상대 닉네임. 상대가 탈퇴한 경우 null", example = "조용한러너", nullable = true)
         String counterpartNickname,
 

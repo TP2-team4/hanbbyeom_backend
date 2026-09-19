@@ -133,6 +133,10 @@ class MyActivitiesIntegrationTest {
                 .andExpect(jsonPath("$[0].status").value("CONFIRMED"))
                 .andExpect(jsonPath("$[1].courseName").value("반포 한강공원"))
                 .andExpect(jsonPath("$[1].status").value("CANCELLED"))
+                // 취소 주체는 CANCELLED에만 있다. 이 매칭은 사용자 행동 없이 시스템이 취소했다(closed_by_user_id NULL)
+                .andExpect(jsonPath("$[1].cancelledBy").value("SYSTEM"))
+                .andExpect(jsonPath("$[0].cancelledBy").value(nullValue()))
+                .andExpect(jsonPath("$[2].cancelledBy").value(nullValue()))
                 .andExpect(jsonPath("$[2].courseName").value("잠실 한강공원"))
                 .andExpect(jsonPath("$[2].status").value("ENDED"))
                 // 화면에 필요한 나머지 필드
@@ -142,6 +146,44 @@ class MyActivitiesIntegrationTest {
                 .andExpect(jsonPath("$[0].scheduledAt").exists())
                 .andExpect(jsonPath("$[0].scheduledEndAt").exists())
                 .andExpect(jsonPath("$[0].counterpartNickname").value("조용한러너"));
+    }
+
+    // 지금은 회원 탈퇴가 유일한 CANCELLED 경로(closed_by_user_id NULL)이지만, 나중에 확정 매칭을 사용자가 직접
+    // 취소하는 기능이 생기면 그 사용자의 id가 closed_by_user_id에 남는다(스키마 정의). 그 경로를 SQL로 재현해
+    // 응답이 취소 주체를 구분하는지 확인한다 — 프론트가 counterpartNickname 등으로 추론하지 않아도 되도록.
+    @Test
+    @DisplayName("CANCELLED의 취소 주체를 내 시점으로 구분한다(ME / COUNTERPART / SYSTEM), 그 외 상태는 null")
+    void 취소_주체를_구분한다() throws Exception {
+        Long me = createUser("나");
+        Long partner = createUser("상대");
+        OffsetDateTime now = OffsetDateTime.now();
+        createMatch(partner, me, "CANCELLED", "시스템 취소", now.minusDays(30));
+        Long cancelledByMe = createMatch(partner, me, "CANCELLED", "내가 취소", now.minusDays(20));
+        Long cancelledByPartner = createMatch(partner, me, "CANCELLED", "상대가 취소", now.minusDays(10));
+        createMatch(partner, me, "ENDED", "종료", now.minusDays(5));
+        jdbcTemplate.update("UPDATE activity_match SET closed_by_user_id = ? WHERE id = ?", me, cancelledByMe);
+        jdbcTemplate.update("UPDATE activity_match SET closed_by_user_id = ? WHERE id = ?", partner, cancelledByPartner);
+
+        mockMvc.perform(get("/api/matching/matches")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(me)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[0].courseName").value("종료"))
+                .andExpect(jsonPath("$[0].cancelledBy").value(nullValue()))
+                .andExpect(jsonPath("$[1].courseName").value("상대가 취소"))
+                .andExpect(jsonPath("$[1].cancelledBy").value("COUNTERPART"))
+                .andExpect(jsonPath("$[2].courseName").value("내가 취소"))
+                .andExpect(jsonPath("$[2].cancelledBy").value("ME"))
+                .andExpect(jsonPath("$[3].courseName").value("시스템 취소"))
+                .andExpect(jsonPath("$[3].cancelledBy").value("SYSTEM"));
+
+        // 같은 매칭을 상대 시점에서 보면 주체가 뒤바뀐다
+        mockMvc.perform(get("/api/matching/matches")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(partner)))
+                .andExpect(jsonPath("$[1].courseName").value("상대가 취소"))
+                .andExpect(jsonPath("$[1].cancelledBy").value("ME"))
+                .andExpect(jsonPath("$[2].courseName").value("내가 취소"))
+                .andExpect(jsonPath("$[2].cancelledBy").value("COUNTERPART"));
     }
 
     @Test

@@ -131,6 +131,10 @@ public class ActivityMatch {
     // closedByUserId는 남기지 않는다(expire()와 동일). confirmedAt/meetingCode는 그대로 둔다 —
     // 채팅이 confirmedAt으로 "한 번이라도 확정된 매칭인지"를 판단해 과거 대화 조회를 유지하기 때문이다.
     // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다(end()와 동일한 이유).
+    //
+    // ⚠️ 계약: 현재 CANCELLED는 이 경로(시스템 처리, closedByUserId=NULL)뿐이다. 나중에 확정 매칭을 사용자가 직접 취소하는
+    // 기능이 생기면 그 경로는 반드시 closedByUserId에 취소한 사용자 id를 남겨야 한다. 활동 이력 API(GET /api/matching/matches)가
+    // closed_by_user_id로 취소 주체(cancelledBy: ME/COUNTERPART/SYSTEM)를 구분하기 때문이다.
     public void cancelByWithdrawal() {
         this.status = ActivityMatchStatus.CANCELLED;
         this.closedAt = OffsetDateTime.now();

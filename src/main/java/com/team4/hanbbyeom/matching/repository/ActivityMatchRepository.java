@@ -101,6 +101,7 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
                am.scheduled_at AS scheduledAt,
                am.scheduled_end_at AS scheduledEndAt,
                am.status AS status,
+               am.closed_by_user_id AS closedByUserId,
                u.nickname AS counterpartNickname,
                CASE
                    WHEN EXISTS (SELECT 1 FROM activity_review r
@@ -132,6 +133,7 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
         Instant getScheduledAt();
         Instant getScheduledEndAt();
         String getStatus();
+        Long getClosedByUserId();
         String getCounterpartNickname();
         String getSubmittedFeedbackType();
     }
