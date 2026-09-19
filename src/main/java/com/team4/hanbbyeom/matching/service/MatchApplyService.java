@@ -9,7 +9,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -247,18 +246,10 @@ public class MatchApplyService {
                         row.getHostRating(),
                         row.getHostCompletedCount(),
                         row.getHostNoShowCount(),
-                        toLatestReview(row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                        MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
                 )
         );
-    }
-
-    // MatchRequestBoardService.toLatestReview()와 동일한 규칙 — 후기 존재 여부는 comment가 아니라
-    // createdAt으로 판단한다(별점만 남긴 후기는 comment가 null이지만 후기는 존재하므로).
-    private MatchBoardItemResponse.AuthorSummary.LatestReview toLatestReview(String comment, Instant createdAt) {
-        if (createdAt == null) {
-            return null;
-        }
-        return new MatchBoardItemResponse.AuthorSummary.LatestReview(comment, createdAt.atOffset(ZoneOffset.UTC));
     }
 
     // activity_match.status를 화면 탭에 맞춘 4가지 표시 상태로 재매핑 — MyApplicationResponse
