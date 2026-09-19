@@ -146,8 +146,10 @@ public class MatchDecisionService {
     }
 
     // PROPOSED는 expireOverdue()가 기한 후에 하던 처리를 탈퇴 시점으로 앞당기는 것이라 기존 expire()를
-    // 재사용한다(신청자 화면에서도 거절과 동일하게 보임). CONFIRMED는 CANCELLED로 닫는다.
-    // 두 경우 모두 참가 연결을 해제하고 양쪽 게시글을 SEARCHING으로 되돌려, 상대가 즉시 다시 모집할 수 있게 한다.
+    // 재사용한다(신청자 화면에서도 거절과 동일하게 보임). CONFIRMED는 예정 종료 시각 전이면 CANCELLED로 닫고,
+    // 이미 지났으면 스케줄러가 했을 ENDED로 닫는다. 참가 연결은 어느 경우든 해제한다.
+    // 게시글은 매칭이 무산된 경우(PROPOSED·진행 전/중 CONFIRMED)에만 SEARCHING으로 되돌려 상대가 즉시 다시
+    // 모집할 수 있게 하고, 정상 종료된 활동은 endOverdueActivities()처럼 CLOSED로 둔다.
     private void closeActiveMatchByWithdrawal(Long activityMatchId) {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
@@ -163,9 +165,25 @@ public class MatchDecisionService {
         }
 
         ActivityMatchStatus previousStatus = activityMatch.getStatus();
+        MatchRequestStatus requestStatusAfter; // 양쪽 게시글이 정리 후 가게 될 상태
         switch (previousStatus) {
-            case PROPOSED -> activityMatch.expire();
-            case CONFIRMED -> activityMatch.cancelByWithdrawal();
+            case PROPOSED -> {
+                activityMatch.expire();
+                requestStatusAfter = MatchRequestStatus.SEARCHING;
+            }
+            case CONFIRMED -> {
+                if (OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt())) {
+                    // 아직 끝나지 않은 확정 매칭 — 더 이상 성사될 수 없으므로 취소하고 상대가 다시 모집할 수 있게 한다
+                    activityMatch.cancelByWithdrawal();
+                    requestStatusAfter = MatchRequestStatus.SEARCHING;
+                } else {
+                    // 활동 종료 시각은 지났는데 1분 주기 스케줄러(endOverdueActivities())가 아직 처리하기 전인 건.
+                    // 이미 끝난 활동을 취소로 바꾸거나 지난 일정의 게시글을 다시 모집 중으로 되돌리면 안 되므로,
+                    // 스케줄러가 했을 처리(ENDED + 게시글 CLOSED)를 그대로 앞당긴다.
+                    activityMatch.end();
+                    requestStatusAfter = MatchRequestStatus.CLOSED;
+                }
+            }
             default -> {
                 // 활성 참가는 PROPOSED/CONFIRMED에만 남아야 한다. 그 외는 비정상 데이터라 건드리지 않는다.
                 log.warn("activityMatchId={} 탈퇴 정리 대상이 아닌 상태입니다: status={}", activityMatchId, previousStatus);
@@ -173,13 +191,14 @@ public class MatchDecisionService {
             }
         }
 
-        // 매칭이 성사되지 않고 끝났으므로 두 참여 연결을 모두 해제한다(안 하면 상대가 다른 매칭에 참여할 수 없다)
+        // 매칭이 끝났으므로 두 참여 연결을 모두 해제한다(안 하면 상대가 다른 매칭에 참여할 수 없다)
         host.get().release();
         applicant.get().release();
 
-        transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.SEARCHING);
+        transitionBothRequests(host.get(), applicant.get(), requestStatusAfter);
 
-        log.info("회원 탈퇴로 매칭 정리: activityMatchId={}, 이전 상태={}", activityMatchId, previousStatus);
+        log.info("회원 탈퇴로 매칭 정리: activityMatchId={}, 이전 상태={}, 정리 후 게시글 상태={}",
+                activityMatchId, previousStatus, requestStatusAfter);
     }
 
     // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 응답 기한이 지난 PROPOSED 건들을

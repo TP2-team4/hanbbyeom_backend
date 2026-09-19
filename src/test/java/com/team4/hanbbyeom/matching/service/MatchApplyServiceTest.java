@@ -362,8 +362,8 @@ class MatchApplyServiceTest {
     }
 
     // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경한다.
-    // 회원 탈퇴 API(UserService.withdraw)는 SEARCHING 게시글을 함께 취소하므로, 여기서는 그 취소 없이
-    // 게시글이 SEARCHING으로 남아 있는 경우(예: 아래 만료 복귀 경로)를 만들기 위해 SQL로 직접 처리한다.
+    // 회원 탈퇴 API(UserService.withdraw)는 호스트 게시글을 함께 정리하므로, 여기서는 그 정리를 거치지 않고
+    // 게시글이 SEARCHING으로 남아 있는 경우를 만들기 위해 SQL로 직접 처리한다.
     private void withdrawUser(Long userId) {
         jdbcTemplate.update(
                 """
@@ -391,9 +391,9 @@ class MatchApplyServiceTest {
                 .isEqualTo(MatchRequestStatus.SEARCHING);
     }
 
-    // 게시글 취소만으로는 부족한 경로: 호스트가 PENDING_CONFIRMATION(신청 대기) 중에 탈퇴하면
-    // expireOverdue()가 응답 기한 경과 후 게시글을 SEARCHING으로 되돌려 유령 글이 부활한다.
-    // 그 상태에서 들어오는 새 신청은 apply()가 막아야 한다.
+    // apply() 가드는 방어선이다. 회원 탈퇴 API는 신청 대기 매칭도 탈퇴 시점에 정리하지만(UserWithdrawIntegrationTest),
+    // 정리를 거치지 않은 탈퇴(SQL로 직접 재현)로 호스트가 신청 대기 중 탈퇴한 상태가 되면 expireOverdue()가
+    // 응답 기한 경과 후 게시글을 SEARCHING으로 되돌린다. 그렇게 부활한 글에 대한 새 신청은 막아야 한다.
     @Test
     void 호스트가_신청_대기_중_탈퇴해_게시글이_SEARCHING으로_복귀해도_새_신청은_거부된다() {
         Long activityMatchId = matchApplyService.apply(applicantUserId, hostRequestId);

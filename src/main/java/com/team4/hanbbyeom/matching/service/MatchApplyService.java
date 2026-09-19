@@ -56,9 +56,9 @@ public class MatchApplyService {
         }
 
         // 탈퇴한 호스트는 영원히 수락·거절할 수 없어 신청자만 응답 기한까지 묶인다.
-        // 게시판 목록 필터(searchBoard)는 발견만 막을 뿐, 캐시된 id로 들어오는 직접 신청과
-        // 호스트가 PENDING_CONFIRMATION에서 탈퇴한 뒤 expireOverdue()가 게시글을 SEARCHING으로
-        // 되돌리는 경로는 막지 못한다 — 그래서 신청 시점에도 확인한다.
+        // 회원 탈퇴는 탈퇴 시점에 호스트 게시글을 취소하지만(MatchDecisionService.closeMatchesOnWithdrawal),
+        // 그 정리를 거치지 않고 남은 게시글이나 캐시된 id로 들어오는 직접 신청에 대비해 신청 시점에도 한 번 더
+        // 확인하는 방어선이다(게시판 목록 필터 searchBoard는 발견만 막을 뿐이다).
         // 탈퇴 여부가 드러나지 않도록 위 상태 검사와 같은 메시지를 사용한다.
         // (users는 matching 도메인이 직접 참조하지 않으므로 fetchNicknames()처럼 jdbcTemplate으로 조회)
         Boolean hostWithdrawn = jdbcTemplate.queryForObject(
