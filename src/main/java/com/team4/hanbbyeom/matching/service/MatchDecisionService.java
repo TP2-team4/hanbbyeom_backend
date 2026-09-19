@@ -15,7 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
-// 호스트의 수락/거절, 그리고 시스템의 자동 만료 처리를 담당. MatchApplyService(신청자 액션)와
+// 호스트의 수락/거절, 그리고 시스템의 자동 만료·회원 탈퇴 시 정리 처리를 담당. MatchApplyService(신청자 액션)와
 // 책임을 나눠서, "누가 주체인 액션인지"로 서비스를 분리했다.
 @Service
 public class MatchDecisionService {
@@ -120,6 +120,66 @@ public class MatchDecisionService {
         applicant.release();
 
         transitionBothRequests(host, applicant, MatchRequestStatus.SEARCHING);
+    }
+
+    // 회원 탈퇴(UserService.withdraw())가 호출 — 탈퇴자가 참가 중인 활성 매칭을 정리하고, 아직 신청자가
+    // 없는 모집 중 게시글을 취소한다. 서버는 탈퇴 시점에 그 사람이 나오지 않을 것을 확정적으로 알고,
+    // 확정(CONFIRMED) 매칭은 시간이 지나도 스스로 정리되지 않아(endOverdueActivities()는 ENDED로 바꿀
+    // 뿐이다) 상대가 약속 장소에 나갔다가 바람맞게 된다. 그래서 탈퇴 시점에 정리한다.
+    //
+    // 순서가 중요하다: 매칭 정리는 양쪽 게시글을 SEARCHING으로 되돌리는데, 탈퇴자 본인 게시글은 그 뒤에
+    // 아래 SEARCHING 취소로 잡아야 한다. 순서가 반대면 탈퇴자의 게시글이 SEARCHING으로 남는다.
+    // 두 단계를 한 메서드에 두는 것은 이 순서를 호출자(UserService)가 알 필요가 없게 하기 위해서다.
+    //
+    // 다른 매칭 액션과 마찬가지로 matching_mutex를 잡아, 동시에 들어오는 신청/수락/거절과 순서를 직렬화한다.
+    @Transactional
+    public void closeMatchesOnWithdrawal(Long userId) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        matchParticipantRepository.findActiveActivityMatchIdByUserId(userId)
+                .ifPresent(this::closeActiveMatchByWithdrawal);
+
+        // 신청자가 없는 모집 중 게시글은 상대방이 없으므로 그대로 취소한다(MatchRequestStatus.CANCELLED = 작성자가 취소함)
+        matchRequestRepository
+                .findByUserIdAndStatusIn(userId, List.of(MatchRequestStatus.SEARCHING))
+                .ifPresent(request -> request.changeStatus(MatchRequestStatus.CANCELLED));
+    }
+
+    // PROPOSED는 expireOverdue()가 기한 후에 하던 처리를 탈퇴 시점으로 앞당기는 것이라 기존 expire()를
+    // 재사용한다(신청자 화면에서도 거절과 동일하게 보임). CONFIRMED는 CANCELLED로 닫는다.
+    // 두 경우 모두 참가 연결을 해제하고 양쪽 게시글을 SEARCHING으로 되돌려, 상대가 즉시 다시 모집할 수 있게 한다.
+    private void closeActiveMatchByWithdrawal(Long activityMatchId) {
+        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
+                .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
+
+        var participants = matchParticipantRepository.findByActivityMatchId(activityMatchId);
+        Optional<MatchParticipant> host = findBySlot(participants, "A");
+        Optional<MatchParticipant> applicant = findBySlot(participants, "B");
+        if (host.isEmpty() || applicant.isEmpty()) {
+            // 비정상 데이터 때문에 되돌릴 수 없는 탈퇴 자체를 막지는 않는다 — expireOverdue()와 같은 방침
+            log.warn("activityMatchId={} 탈퇴 정리 중 참가자 데이터 이상 발견(host 존재={}, applicant 존재={}) - " +
+                    "이 건은 건너뜁니다.", activityMatchId, host.isPresent(), applicant.isPresent());
+            return;
+        }
+
+        ActivityMatchStatus previousStatus = activityMatch.getStatus();
+        switch (previousStatus) {
+            case PROPOSED -> activityMatch.expire();
+            case CONFIRMED -> activityMatch.cancelByWithdrawal();
+            default -> {
+                // 활성 참가는 PROPOSED/CONFIRMED에만 남아야 한다. 그 외는 비정상 데이터라 건드리지 않는다.
+                log.warn("activityMatchId={} 탈퇴 정리 대상이 아닌 상태입니다: status={}", activityMatchId, previousStatus);
+                return;
+            }
+        }
+
+        // 매칭이 성사되지 않고 끝났으므로 두 참여 연결을 모두 해제한다(안 하면 상대가 다른 매칭에 참여할 수 없다)
+        host.get().release();
+        applicant.get().release();
+
+        transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.SEARCHING);
+
+        log.info("회원 탈퇴로 매칭 정리: activityMatchId={}, 이전 상태={}", activityMatchId, previousStatus);
     }
 
     // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 응답 기한이 지난 PROPOSED 건들을

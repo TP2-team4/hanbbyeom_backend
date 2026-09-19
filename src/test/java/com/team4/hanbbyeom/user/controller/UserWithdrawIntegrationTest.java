@@ -1,10 +1,18 @@
 package com.team4.hanbbyeom.user.controller;
 
+import com.team4.hanbbyeom.chat.domain.ChatMessage;
+import com.team4.hanbbyeom.chat.repository.ChatMessageRepository;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import com.team4.hanbbyeom.matching.domain.ActivityMatch;
+import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
+import com.team4.hanbbyeom.matching.service.MatchApplyService;
+import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
@@ -42,6 +50,11 @@ class UserWithdrawIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
     @Autowired private MatchRequestRepository matchRequestRepository;
+    @Autowired private ActivityMatchRepository activityMatchRepository;
+    @Autowired private MatchParticipantRepository matchParticipantRepository;
+    @Autowired private ChatMessageRepository chatMessageRepository;
+    @Autowired private MatchApplyService matchApplyService;
+    @Autowired private MatchDecisionService matchDecisionService;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -261,27 +274,6 @@ class UserWithdrawIntegrationTest {
                 .isEqualTo(MatchRequestStatus.CANCELLED);
     }
 
-    // 신청이 진행 중이거나 확정된 매칭은 상대방이 있어, 즉시 취소·통보할지 기한까지 기다릴지가
-    // 제품 결정이라 이번 범위에서는 건드리지 않는다(별도 이슈). 그 경계를 테스트로 고정해 둔다.
-    @Test
-    @DisplayName("신청 대기(PENDING_CONFIRMATION)·확정(MATCHED) 게시글은 탈퇴 시 건드리지 않는다")
-    void 탈퇴해도_진행_중인_매칭_게시글은_그대로다() throws Exception {
-        User pendingUser = createUser("pending-" + UUID.randomUUID() + "@example.com");
-        MatchRequest pending = createMatchRequest(pendingUser.getId(), MatchRequestStatus.PENDING_CONFIRMATION);
-        User matchedUser = createUser("matched-" + UUID.randomUUID() + "@example.com");
-        MatchRequest matched = createMatchRequest(matchedUser.getId(), MatchRequestStatus.MATCHED);
-
-        withdraw(bearerToken(pendingUser.getId()), PASSWORD).andExpect(status().isNoContent());
-        withdraw(bearerToken(matchedUser.getId()), PASSWORD).andExpect(status().isNoContent());
-        entityManager.flush();
-        entityManager.clear();
-
-        assertThat(matchRequestRepository.findById(pending.getId()).orElseThrow().getStatus())
-                .isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
-        assertThat(matchRequestRepository.findById(matched.getId()).orElseThrow().getStatus())
-                .isEqualTo(MatchRequestStatus.MATCHED);
-    }
-
     @Test
     @DisplayName("비밀번호가 틀려 탈퇴가 거부되면 모집 중 게시글도 취소되지 않는다")
     void 탈퇴가_거부되면_게시글도_유지된다() throws Exception {
@@ -294,5 +286,179 @@ class UserWithdrawIntegrationTest {
 
         assertThat(matchRequestRepository.findById(request.getId()).orElseThrow().getStatus())
                 .isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    // ---- 진행 중인 매칭 정리 -------------------------------------------------------------
+    // 탈퇴자가 참가 중인 활성 매칭(PROPOSED/CONFIRMED)은 탈퇴 시점에 정리된다. 서버는 그 사람이 나오지 않을
+    // 것을 확정적으로 알고, 확정된 매칭은 시간이 지나도 스스로 정리되지 않아 상대가 약속 장소에서 바람맞기 때문이다.
+
+    // 호스트 게시글 + 러닝 조건(신청이 raw SQL로 조회함)을 만든다
+    private MatchRequest createHostPost(Long hostUserId) {
+        MatchRequest request = matchRequestRepository.save(new MatchRequest(
+                hostUserId, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT,
+                OffsetDateTime.now().plusHours(9)
+        ));
+        Long courseId = jdbcTemplate.queryForObject(
+                "SELECT id FROM running_course WHERE name = ? LIMIT 1", Long.class, "뚝섬 한강공원");
+        jdbcTemplate.update(
+                """
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                request.getId(), courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
+        );
+        return request;
+    }
+
+    private Long applyTo(Long hostPostId, Long applicantUserId) {
+        Long activityMatchId = matchApplyService.apply(applicantUserId, hostPostId);
+        entityManager.flush();
+        return activityMatchId;
+    }
+
+    private void confirm(Long hostUserId, Long activityMatchId) {
+        matchDecisionService.accept(hostUserId, activityMatchId);
+        entityManager.flush();
+    }
+
+    private void withdrawSuccessfully(Long userId) throws Exception {
+        entityManager.flush();
+        withdraw(bearerToken(userId), PASSWORD).andExpect(status().isNoContent());
+        entityManager.flush();
+        entityManager.clear();
+    }
+
+    private MatchRequestStatus postStatus(Long requestId) {
+        return matchRequestRepository.findById(requestId).orElseThrow().getStatus();
+    }
+
+    @Test
+    @DisplayName("신청 대기(PROPOSED) 중 호스트가 탈퇴하면 매칭이 EXPIRED로 닫히고 호스트 게시글은 CANCELLED가 된다")
+    void 신청_대기_중_호스트가_탈퇴하면_매칭이_만료되고_게시글이_취소된다() throws Exception {
+        User host = createUser("host-p-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-p-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        MatchRequest applicantOwnPost = createMatchRequest(applicant.getId(), MatchRequestStatus.SEARCHING);
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+
+        withdrawSuccessfully(host.getId());
+
+        ActivityMatch match = activityMatchRepository.findById(matchId).orElseThrow();
+        assertThat(match.getStatus()).isEqualTo(ActivityMatchStatus.EXPIRED);
+        assertThat(match.getClosedByUserId()).isNull();
+        assertThat(matchParticipantRepository.findByActivityMatchId(matchId))
+                .allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+        // 정리(SEARCHING 복귀) 뒤에 SEARCHING 취소가 실행돼야 한다 — 순서가 반대면 SEARCHING으로 남는다
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CANCELLED);
+        // 상대(신청자)는 즉시 다른 매칭에 다시 참여할 수 있고, 본인 게시글은 모집 중으로 유지된다
+        assertThat(matchParticipantRepository.findActiveActivityMatchIdByUserId(applicant.getId())).isEmpty();
+        assertThat(postStatus(applicantOwnPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    @Test
+    @DisplayName("신청 대기(PROPOSED) 중 신청자가 탈퇴하면 매칭이 EXPIRED로 닫히고 호스트 게시글이 모집 중으로 복귀한다")
+    void 신청_대기_중_신청자가_탈퇴하면_호스트_게시글이_모집_중으로_복귀한다() throws Exception {
+        User host = createUser("host-pa-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-pa-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
+
+        withdrawSuccessfully(applicant.getId());
+
+        assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.EXPIRED);
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+        assertThat(matchParticipantRepository.findActiveActivityMatchIdByUserId(host.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("확정(CONFIRMED) 후 호스트가 탈퇴하면 매칭이 CANCELLED로 닫히고, 상대는 새 메시지를 못 보내지만 과거 대화는 볼 수 있다")
+    void 확정_후_호스트가_탈퇴하면_매칭이_취소되고_상대_채팅은_전송만_막힌다() throws Exception {
+        User host = createUser("host-c-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-c-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        MatchRequest applicantOwnPost = createMatchRequest(applicant.getId(), MatchRequestStatus.SEARCHING);
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        confirm(host.getId(), matchId);
+        chatMessageRepository.saveAndFlush(new ChatMessage(matchId, host.getId(), "내일 2번 출구에서 봬요."));
+        // 노쇼 카운트가 늘지 않는지 확인하기 위한 신뢰 프로필(기본값 no_show_report_count=0)
+        jdbcTemplate.update("INSERT INTO trust_profile (user_id) VALUES (?), (?)", host.getId(), applicant.getId());
+
+        withdrawSuccessfully(host.getId());
+
+        ActivityMatch match = activityMatchRepository.findById(matchId).orElseThrow();
+        assertThat(match.getStatus()).isEqualTo(ActivityMatchStatus.CANCELLED);
+        assertThat(match.getClosedByUserId()).isNull();
+        assertThat(match.getClosedAt()).isNotNull();
+        assertThat(match.getConfirmedAt()).isNotNull(); // 과거 대화 조회의 기준이라 유지된다
+        assertThat(matchParticipantRepository.findByActivityMatchId(matchId))
+                .allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CANCELLED);
+        assertThat(postStatus(applicantOwnPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+
+        // 노쇼가 아니라 사전 취소이므로 신고 횟수는 그대로다
+        Integer noShowCount = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(no_show_report_count), 0) FROM trust_profile WHERE user_id IN (?, ?)",
+                Integer.class, host.getId(), applicant.getId());
+        assertThat(noShowCount).isZero();
+
+        // 상대는 탈퇴한 사람과의 채팅에 새 메시지를 보낼 수 없다(409)
+        mockMvc.perform(post("/api/matching/matches/{id}/messages", matchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(applicant.getId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\": \"어디세요?\"}"))
+                .andExpect(status().isConflict());
+        // 하지만 과거 대화는 계속 볼 수 있다
+        mockMvc.perform(get("/api/matching/matches/{id}/messages", matchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(applicant.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].content").value("내일 2번 출구에서 봬요."));
+
+        // 신청자 화면(내 신청 내역)에서는 직접 취소한 것이 아니므로 "취소함"이 아니라 "거절됨"으로 보인다
+        assertThat(matchApplyService.getMyApplications(applicant.getId(), "REJECTED"))
+                .extracting(r -> r.activityMatchId()).containsExactly(matchId);
+        assertThat(matchApplyService.getMyApplications(applicant.getId(), "CANCELLED")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("확정(CONFIRMED) 후 신청자가 탈퇴하면 매칭이 CANCELLED로 닫히고 호스트 게시글이 다시 모집 중이 된다")
+    void 확정_후_신청자가_탈퇴하면_호스트_게시글이_모집_중으로_복귀한다() throws Exception {
+        User host = createUser("host-ca-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-ca-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        confirm(host.getId(), matchId);
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.MATCHED);
+
+        withdrawSuccessfully(applicant.getId());
+
+        assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.CANCELLED);
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+        // 호스트가 즉시 다시 모집할 수 있다 — 다른 사람이 같은 글에 신청할 수 있다
+        User another = createUser("app-ca2-" + UUID.randomUUID() + "@example.com");
+        assertThat(matchApplyService.apply(another.getId(), hostPost.getId())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("비밀번호가 틀려 탈퇴가 거부되면 진행 중인 매칭도 그대로 유지된다")
+    void 탈퇴가_거부되면_진행_중인_매칭도_유지된다() throws Exception {
+        User host = createUser("host-r-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-r-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        confirm(host.getId(), matchId);
+
+        withdraw(bearerToken(host.getId()), "not-my-password").andExpect(status().isForbidden());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.CONFIRMED);
+        assertThat(matchParticipantRepository.findByActivityMatchId(matchId))
+                .allSatisfy(p -> assertThat(p.getReleasedAt()).isNull());
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.MATCHED);
     }
 }

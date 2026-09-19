@@ -29,4 +29,14 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     WHERE p.matchRequestId = :requestId AND p.releasedAt IS NULL
     """)
     Optional<Long> findActiveActivityMatchIdByMatchRequestId(@Param("requestId") Long requestId);
+
+    // 회원 탈퇴 시 탈퇴자가 지금 참가 중인 activity_match를 찾는 쿼리. 위 쿼리와 같은 releasedAt IS NULL
+    // 패턴을 사용자 기준으로 적용한다. 한 사용자는 동시에 하나의 활성 참여만 가질 수 있다는 DB 제약
+    // (uq_participant_active_user)이 있어 결과는 0건 또는 1건이다. 활성 참여는 PROPOSED(신청 대기)
+    // 또는 CONFIRMED(확정) 상태의 매칭에만 남는다(그 외 상태로 끝나면 release()로 해제됨).
+    @Query("""
+    SELECT p.activityMatchId FROM MatchParticipant p
+    WHERE p.userId = :userId AND p.releasedAt IS NULL
+    """)
+    Optional<Long> findActiveActivityMatchIdByUserId(@Param("userId") Long userId);
 }
