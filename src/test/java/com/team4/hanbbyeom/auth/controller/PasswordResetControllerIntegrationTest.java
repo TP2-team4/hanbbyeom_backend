@@ -292,4 +292,48 @@ class PasswordResetControllerIntegrationTest {
                         )))
                 .andExpect(status().isNoContent());
     }
+
+    @Test
+    @DisplayName("앞뒤 공백과 대소문자가 포함된 새 비밀번호의 원문 유지")
+    void 새_비밀번호_원문_유지() throws Exception {
+        String email = 새_이메일();
+        가입_사용자_생성(email);
+        재설정_인증_완료(email);
+
+        // 앞뒤 공백·중간 공백·대문자가 섞인 원문 (18자·18바이트)
+        // @NotBlank는 공백뿐인 값만 거르므로 앞뒤 공백이 있어도 검증 통과
+        String rawPassword = "  Pass Word 1234  ";
+
+        mockMvc.perform(post("/api/auth/password-reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(재설정_요청_본문(
+                                email,
+                                VERIFICATION_CODE,
+                                rawPassword
+                        )))
+                .andExpect(status().isNoContent());
+
+        // 이메일과 달리 비밀번호는 공백 제거·소문자 변환 없이 원문 그대로 암호화되는지 확인
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s"
+                                }
+                                """.formatted(email, rawPassword)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty());
+
+        // 다듬은 값으로는 로그인 불가. 저장 시 원문이 변형되지 않았음을 반대편에서 확인
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s"
+                                }
+                                """.formatted(email, rawPassword.trim())))
+                .andExpect(status().isUnauthorized());
+    }
 }
