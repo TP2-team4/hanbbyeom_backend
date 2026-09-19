@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.auth.service;
 
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
+import com.team4.hanbbyeom.auth.exception.PasswordResetAuthenticationException;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.global.util.EmailNormalizer;
@@ -11,6 +12,7 @@ import jakarta.mail.internet.MimeMessage; // HTML, 이미지, 첨부파일, 인�
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value; // Spring 설정값을 필드에 주입하기 위해 사용하는 @Value 어노테이션
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.domain.Limit;
 import org.springframework.mail.javamail.JavaMailSender; // 메일 발송 인터페이스
 import org.springframework.mail.javamail.MimeMessageHelper; // MimeMessage를 좀 더 쉽게 작성하게 지원
 import org.springframework.stereotype.Service;
@@ -45,6 +47,9 @@ public class EmailVerificationService {
 
     // 인증 코드 입력 실패 허용 횟수 (무차별 대입 방지)
     private static final int MAX_ATTEMPT_COUNT = 5;
+
+    // 인증 완료 후 비밀번호 변경 허용 시간
+    private static final Duration PASSWORD_RESET_WINDOW = Duration.ofMinutes(10);
 
     // Service 동작에 필요한 도구(의존성) 선언 필드
     private final EmailVerificationRepository emailVerificationRepository; // 이메일 인증 기록을 DB에 저장하고 조회하기 위해 사용
@@ -185,6 +190,58 @@ public class EmailVerificationService {
                 // 위 과정을 거치고도 값이 비어있으면(기록 자체가 없거나, 있어도 미인증) 예외를 던짐
                 // (호출 시점엔 이미 인증됐다고 가정하는 상황이라 값이 없는 건 비정상 상태)
                 .orElseThrow(() -> new IllegalStateException("이메일 인증을 먼저 완료해주세요."));
+    }
+
+    // 비밀번호를 변경하기 전에, 가장 최근의 비밀번호 재설정 인증이 유효한지 최종 확인
+    // 같은 인증 기록으로 여러 요청이 동시에 처리되지 않도록 DB에서 해당 기록을 잠금 조회(Lock 걸어서 동시요청충돌 방지)
+    @Transactional(noRollbackFor = VerificationCodeMismatchException.class)
+    public void validatePasswordResetAuthorization(String rawEmail, String rawCode) {
+        String email = EmailNormalizer.normalize(rawEmail);
+
+        // 해당 이메일의 가장 최근 비밀번호 재설정 인증 기록을 잠금 상태로 조회
+        EmailVerification verification = emailVerificationRepository
+                .findLatestForUpdate(
+                        email,
+                        VerificationPurpose.PASSWORD_RESET,
+                        Limit.of(1)
+                )
+                .orElseThrow(PasswordResetAuthenticationException::new);
+
+        // 이메일 인증이 완료되지 않았거나 최대 시도 횟수를 초과했다면 비밀번호 재설정 불가
+        if (verification.getVerifiedAt() == null
+                || verification.getAttemptCount() >= MAX_ATTEMPT_COUNT) {
+            throw new PasswordResetAuthenticationException();
+        }
+
+        // 이메일 인증 완료 후 허용된 비밀번호 재설정 시간(10분)이 지났는지 확인
+        Instant resetDeadline = verification
+                .getVerifiedAt()
+                .plus(PASSWORD_RESET_WINDOW);
+
+        if (Instant.now(clock).isAfter(resetDeadline)) {
+            throw new PasswordResetAuthenticationException();
+        }
+
+        // 비밀번호 변경 요청에 포함된 인증 코드를 다시 확인
+        // 코드가 틀리면 실패 횟수를 1 증가시키고 인증 실패 처리
+        if (!matchesHash(rawCode, verification.getCodeHash())) {
+            verification.increaseAttemptCount();
+
+            throw new VerificationCodeMismatchException(
+                    PasswordResetAuthenticationException.MESSAGE
+            );
+        }
+    }
+
+    // 비밀번호 변경이 끝난 뒤 같은 인증 기록을 다시 사용할 수 없도록, 해당 이메일의 비밀번호 재설정 인증 기록을 모두 삭제
+    @Transactional
+    public void consumePasswordResetVerifications(String rawEmail) {
+        String email = EmailNormalizer.normalize(rawEmail);
+
+        emailVerificationRepository.deleteAllByEmailAndPurpose(
+                email,
+                VerificationPurpose.PASSWORD_RESET
+        );
     }
 
     // 같은 이메일로 같은 목적의 인증 코드를 다시 보낼 수 있는지 (최근 발송 시각 기준 재발송 가능 여부) 확인
