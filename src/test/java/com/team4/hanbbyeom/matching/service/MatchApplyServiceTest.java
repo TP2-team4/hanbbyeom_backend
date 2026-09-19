@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -358,5 +359,66 @@ class MatchApplyServiceTest {
 
         assertThat(matchApplyService.getMyApplications(applicantUserId, "REJECTED"))
                 .extracting(MyApplicationResponse::activityMatchId).containsExactly(expiredId);
+    }
+
+    // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경한다.
+    // 회원 탈퇴 API(UserService.withdraw)는 SEARCHING 게시글을 함께 취소하므로, 여기서는 그 취소 없이
+    // 게시글이 SEARCHING으로 남아 있는 경우(예: 아래 만료 복귀 경로)를 만들기 위해 SQL로 직접 처리한다.
+    private void withdrawUser(Long userId) {
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                userId
+        );
+    }
+
+    // 게시판 목록 필터(searchBoard)는 "발견"만 막을 뿐이다. 탈퇴한 호스트는 수락·거절을 영원히
+    // 할 수 없어 신청자만 응답 기한까지 묶이므로, 캐시된 id로 들어오는 직접 신청도 거부해야 한다.
+    // 탈퇴 여부가 드러나지 않도록 일반 마감 글과 같은 메시지를 쓴다.
+    @Test
+    void 탈퇴한_호스트의_모집글에는_신청할_수_없다() {
+        withdrawUser(hostUserId);
+
+        assertThatThrownBy(() -> matchApplyService.apply(applicantUserId, hostRequestId))
+                .isInstanceOf(MatchRequestNotSearchingException.class)
+                .hasMessage("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
+
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    // 게시글 취소만으로는 부족한 경로: 호스트가 PENDING_CONFIRMATION(신청 대기) 중에 탈퇴하면
+    // expireOverdue()가 응답 기한 경과 후 게시글을 SEARCHING으로 되돌려 유령 글이 부활한다.
+    // 그 상태에서 들어오는 새 신청은 apply()가 막아야 한다.
+    @Test
+    void 호스트가_신청_대기_중_탈퇴해_게시글이_SEARCHING으로_복귀해도_새_신청은_거부된다() {
+        Long activityMatchId = matchApplyService.apply(applicantUserId, hostRequestId);
+        entityManager.flush(); // apply()의 게시글 상태 전이(PENDING_CONFIRMATION)를 DB에 반영
+
+        withdrawUser(hostUserId);
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
+        entityManager.clear();
+
+        matchDecisionService.expireOverdue();
+
+        // 탈퇴한 호스트의 게시글이 다시 SEARCHING이 된다(이 경로가 실제로 존재함을 확인)
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
+
+        Long anotherApplicantUserId = createUser("applicant2");
+        assertThatThrownBy(() -> matchApplyService.apply(anotherApplicantUserId, hostRequestId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
     }
 }

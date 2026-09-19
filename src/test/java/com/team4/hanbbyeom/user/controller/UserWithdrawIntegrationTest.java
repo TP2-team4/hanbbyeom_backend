@@ -1,6 +1,10 @@
 package com.team4.hanbbyeom.user.controller;
 
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
+import com.team4.hanbbyeom.matching.domain.TalkLevel;
+import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
@@ -20,6 +24,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +41,7 @@ class UserWithdrawIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
+    @Autowired private MatchRequestRepository matchRequestRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -229,5 +235,64 @@ class UserWithdrawIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\": \"" + email + "\", \"password\": \"" + PASSWORD + "\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private MatchRequest createMatchRequest(Long userId, MatchRequestStatus status) {
+        MatchRequest request = matchRequestRepository.save(new MatchRequest(
+                userId, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT,
+                OffsetDateTime.now().plusHours(9)
+        ));
+        request.changeStatus(status);
+        matchRequestRepository.flush();
+        return request;
+    }
+
+    @Test
+    @DisplayName("탈퇴하면 본인의 모집 중(SEARCHING) 게시글이 CANCELLED로 바뀐다")
+    void 탈퇴하면_모집_중_게시글이_취소된다() throws Exception {
+        User user = createUser("cancel-" + UUID.randomUUID() + "@example.com");
+        MatchRequest request = createMatchRequest(user.getId(), MatchRequestStatus.SEARCHING);
+
+        withdraw(bearerToken(user.getId()), PASSWORD).andExpect(status().isNoContent());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(matchRequestRepository.findById(request.getId()).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.CANCELLED);
+    }
+
+    // 신청이 진행 중이거나 확정된 매칭은 상대방이 있어, 즉시 취소·통보할지 기한까지 기다릴지가
+    // 제품 결정이라 이번 범위에서는 건드리지 않는다(별도 이슈). 그 경계를 테스트로 고정해 둔다.
+    @Test
+    @DisplayName("신청 대기(PENDING_CONFIRMATION)·확정(MATCHED) 게시글은 탈퇴 시 건드리지 않는다")
+    void 탈퇴해도_진행_중인_매칭_게시글은_그대로다() throws Exception {
+        User pendingUser = createUser("pending-" + UUID.randomUUID() + "@example.com");
+        MatchRequest pending = createMatchRequest(pendingUser.getId(), MatchRequestStatus.PENDING_CONFIRMATION);
+        User matchedUser = createUser("matched-" + UUID.randomUUID() + "@example.com");
+        MatchRequest matched = createMatchRequest(matchedUser.getId(), MatchRequestStatus.MATCHED);
+
+        withdraw(bearerToken(pendingUser.getId()), PASSWORD).andExpect(status().isNoContent());
+        withdraw(bearerToken(matchedUser.getId()), PASSWORD).andExpect(status().isNoContent());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(matchRequestRepository.findById(pending.getId()).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
+        assertThat(matchRequestRepository.findById(matched.getId()).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.MATCHED);
+    }
+
+    @Test
+    @DisplayName("비밀번호가 틀려 탈퇴가 거부되면 모집 중 게시글도 취소되지 않는다")
+    void 탈퇴가_거부되면_게시글도_유지된다() throws Exception {
+        User user = createUser("keep-" + UUID.randomUUID() + "@example.com");
+        MatchRequest request = createMatchRequest(user.getId(), MatchRequestStatus.SEARCHING);
+
+        withdraw(bearerToken(user.getId()), "not-my-password").andExpect(status().isForbidden());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(matchRequestRepository.findById(request.getId()).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
     }
 }
