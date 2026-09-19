@@ -74,10 +74,23 @@ public class MatchRequestBoardService {
                         new MatchBoardItemResponse.AuthorSummary(
                                 row.getAuthorNickname(),
                                 row.getAuthorRating(),
-                                row.getAuthorCompletedCount()
+                                row.getAuthorCompletedCount(),
+                                row.getAuthorNoShowCount(),
+                                toLatestReview(row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
                         )
                 ))
                 .collect(Collectors.toList());
+    }
+
+    // 최근 후기 서브쿼리(LEFT JOIN LATERAL) 결과를 AuthorSummary.LatestReview로 변환한다.
+    // "후기가 있는지"는 comment가 아니라 createdAt으로 판단해야 한다 — 후기는 있는데 한 줄
+    // 후기(comment)만 안 남긴 경우(별점만 등록)가 정상 케이스라서, comment==null을 "후기 없음"으로
+    // 읽으면 그 후기가 통째로 사라진다. createdAt은 후기 행이 있으면 항상 값이 있다(NOT NULL).
+    private MatchBoardItemResponse.AuthorSummary.LatestReview toLatestReview(String comment, Instant createdAt) {
+        if (createdAt == null) {
+            return null;
+        }
+        return new MatchBoardItemResponse.AuthorSummary.LatestReview(comment, createdAt.atOffset(ZoneOffset.UTC));
     }
 
     // "오늘"/"내일"/"이번 주말" 같은 프리셋을 실제 날짜 범위로 변환. WEEKEND는 이번 주 토요일이
@@ -148,7 +161,15 @@ public class MatchRequestBoardService {
                 row.getStatus(),
                 row.getUserId().equals(currentUserId),
                 pendingApplicantCount,
-                new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
+                // 목록(getBoard)과 같은 값을 내려준다 — 이전엔 (nickname, null, null)로 하드코딩돼 있어
+                // 상세 화면에서만 평점/완료횟수가 항상 비어 보이던 버그 (이슈 #70)
+                new MatchBoardItemResponse.AuthorSummary(
+                        nickname,
+                        row.getAuthorRating(),
+                        row.getAuthorCompletedCount(),
+                        row.getAuthorNoShowCount(),
+                        toLatestReview(row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                )
         );
     }
 

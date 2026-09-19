@@ -21,7 +21,12 @@ public record MatchBoardItemResponse(
             @Schema(description = "작성자 닉네임. 작성자가 탈퇴한 경우 null이며, 표시 문구는 클라이언트에서 정한다",
                     example = "한뼘러너", nullable = true)
             String nickname,
-            Double rating,        // TODO: 신뢰 프로필 도메인 연동 전까지는 null
-            Integer completedCount // TODO: 위와 동일
-    ) {}
+            Double rating,
+            Integer completedCount,
+            Integer noShowCount,
+            LatestReview latestReview // 받은 후기가 하나도 없으면 null
+    ) {
+        // 노쇼 신고와 마찬가지로 신뢰 프로필 카드에 보여줄 "가장 최근 후기 한 줄" (이슈 #70)
+        public record LatestReview(String comment, OffsetDateTime createdAt) {}
+    }
 }
