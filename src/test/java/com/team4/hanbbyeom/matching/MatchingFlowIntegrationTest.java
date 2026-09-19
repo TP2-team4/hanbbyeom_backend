@@ -463,4 +463,48 @@ class MatchingFlowIntegrationTest {
                         .content(createRequestJson("망원 한강공원 앞 (재등록)")))
                 .andExpect(status().isCreated());
     }
+
+    // 회귀 테스트: 탈퇴한 작성자의 SEARCHING 모집글이 모집 탭에 남아 있으면 안 된다.
+    // 탈퇴 시 users.nickname이 NULL로 지워지는데 글은 그대로 남아, 닉네임 없는 글이 노출되던 문제
+    // (PR #81 리뷰 피드백으로 발견).
+    @Test
+    @DisplayName("탈퇴한 작성자의 모집글은 모집 탭 목록에서 제외된다")
+    void 탈퇴한_작성자의_모집글은_목록에서_제외된다() throws Exception {
+        Long hostUserId = createUser("탈퇴할호스트");
+        Long viewerUserId = createUser("조회자");
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        // 탈퇴 전에는 노출된다
+        mockMvc.perform(get("/api/matching/board")
+                        .param("course", "뚝섬 한강공원")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+
+        // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                hostUserId
+        );
+
+        // 글 자체는 SEARCHING으로 남아 있지만 목록에는 나오지 않는다
+        mockMvc.perform(get("/api/matching/board")
+                        .param("course", "뚝섬 한강공원")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
+    }
 }
