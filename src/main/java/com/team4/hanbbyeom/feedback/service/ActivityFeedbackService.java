@@ -17,6 +17,7 @@ import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,16 +58,24 @@ public class ActivityFeedbackService {
     public void submitReview(Long activityMatchId, Long reviewerId, ReviewCreateRequest request) {
         Long revieweeId = validateAndGetCounterpart(activityMatchId, reviewerId);
 
-        // 같은 활동에 대해 후기든 신고든 이미 뭔가 제출했다면 또 제출 못 하게 막음
+        // 같은 활동에 대해 후기든 신고든 이미 뭔가 제출했다면 또 제출 못 하게 막음.
+        // 이 existsBy 체크와 save() 사이에는 시간차가 있어서, 같은 사용자가 거의 동시에
+        // 두 번 요청을 보내면(더블클릭 등) 둘 다 이 체크를 통과할 수 있다 — 그다음은
+        // uq_activity_review_once UNIQUE 제약이 최종 방어선이고, 그 위반을 아래 catch에서
+        // FeedbackAlreadySubmittedException(409)으로 바꿔준다(안 그러면 500이 나감).
         if (activityReviewRepository.existsByActivityMatchIdAndReviewerUserId(activityMatchId, reviewerId)
                 || noShowReportRepository.existsByActivityMatchIdAndReporterUserId(activityMatchId, reviewerId)) {
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 
-        activityReviewRepository.save(new ActivityReview(
-                activityMatchId, reviewerId, revieweeId,
-                request.rating(), request.perceivedTalkLevel(), request.comment()
-        ));
+        try {
+            activityReviewRepository.save(new ActivityReview(
+                    activityMatchId, reviewerId, revieweeId,
+                    request.rating(), request.perceivedTalkLevel(), request.comment()
+            ));
+        } catch (DataIntegrityViolationException e) {
+            throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
+        }
 
         applyReviewToTrustProfile(revieweeId, request.rating(), request.perceivedTalkLevel());
     }
@@ -77,15 +86,20 @@ public class ActivityFeedbackService {
     public void submitNoShowReport(Long activityMatchId, Long reporterId, NoShowReportCreateRequest request) {
         Long reportedId = validateAndGetCounterpart(activityMatchId, reporterId);
 
+        // submitReview()와 동일한 이유로 existsBy 체크 + UNIQUE 제약 위반 catch를 같이 둔다.
         if (activityReviewRepository.existsByActivityMatchIdAndReviewerUserId(activityMatchId, reporterId)
                 || noShowReportRepository.existsByActivityMatchIdAndReporterUserId(activityMatchId, reporterId)) {
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 
-        noShowReportRepository.save(new NoShowReport(
-                activityMatchId, reporterId, reportedId,
-                request.reason(), request.detail()
-        ));
+        try {
+            noShowReportRepository.save(new NoShowReport(
+                    activityMatchId, reporterId, reportedId,
+                    request.reason(), request.detail()
+            ));
+        } catch (DataIntegrityViolationException e) {
+            throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
+        }
 
         incrementNoShowCount(reportedId);
     }
@@ -93,6 +107,7 @@ public class ActivityFeedbackService {
     // "지금 이 활동에 대해 후기/신고를 낼 수 있는지" 프론트가 미리 물어보는 용도.
     // submitReview/submitNoShowReport와 달리 예외를 던지지 않고, canSubmit=false로만 알려준다
     // (참가자가 아니면 아예 조회 자체를 막는 게 자연스러워서 그 경우만 예외로 처리).
+    @Transactional(readOnly = true)
     public FeedbackStatusResponse getFeedbackStatus(Long activityMatchId, Long userId) {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
@@ -160,58 +175,53 @@ public class ActivityFeedbackService {
     // 일반적인 누적 평균 공식이다. 대화 수준은 SILENT/LIGHT_CHAT 중 어느 쪽 vote 컬럼을
     // 올릴지가 갈려서, 동적으로 컬럼명을 만들지 않고 두 SQL을 그냥 분기해서 각각 명시했다
     // (SQL 인젝션 걱정 없이 가장 단순하고 안전한 방법).
+    //
+    // UPDATE 후 0행이면 INSERT하는 방식 대신 단일 INSERT ... ON CONFLICT DO UPDATE(upsert)를 쓴다.
+    // user_id가 trust_profile의 PK라 ON CONFLICT (user_id)가 그대로 성립하고, 이 한 문장이
+    // 원자적으로 처리되므로 "trust_profile 행이 없는 같은 사용자에게 서로 다른 두 매칭에서
+    // 거의 동시에 후기가 들어오는" 경우에도 PK 충돌(UPDATE 0행 → 두 트랜잭션 모두 INSERT 시도)이
+    // 생기지 않는다 (PR #83 리뷰로 발견된 레이스).
     private void applyReviewToTrustProfile(Long userId, Integer rating, TalkLevel talkLevel) {
         boolean isSilent = talkLevel == TalkLevel.SILENT;
 
-        int updatedRows = isSilent
-                ? jdbcTemplate.update("""
-                    UPDATE trust_profile
-                    SET average_rating = ROUND((average_rating * review_count + ?) / (review_count + 1), 1),
-                        review_count = review_count + 1,
-                        completed_activity_count = completed_activity_count + 1,
-                        review_silent_vote_count = review_silent_vote_count + 1
-                    WHERE user_id = ?
-                    """, rating, userId)
-                : jdbcTemplate.update("""
-                    UPDATE trust_profile
-                    SET average_rating = ROUND((average_rating * review_count + ?) / (review_count + 1), 1),
-                        review_count = review_count + 1,
-                        completed_activity_count = completed_activity_count + 1,
-                        review_light_chat_vote_count = review_light_chat_vote_count + 1
-                    WHERE user_id = ?
-                    """, rating, userId);
-
-        // UPDATE가 0행이면 이 사용자는 trust_profile 행이 아직 없다는 뜻(첫 활동) — 새로 만들어준다
-        if (updatedRows == 0) {
-            if (isSilent) {
-                jdbcTemplate.update("""
-                    INSERT INTO trust_profile
-                        (user_id, average_rating, review_count, completed_activity_count, review_silent_vote_count)
-                    VALUES (?, ?, 1, 1, 1)
-                    """, userId, rating);
-            } else {
-                jdbcTemplate.update("""
-                    INSERT INTO trust_profile
-                        (user_id, average_rating, review_count, completed_activity_count, review_light_chat_vote_count)
-                    VALUES (?, ?, 1, 1, 1)
-                    """, userId, rating);
-            }
+        if (isSilent) {
+            jdbcTemplate.update("""
+                INSERT INTO trust_profile
+                    (user_id, average_rating, review_count, completed_activity_count, review_silent_vote_count)
+                VALUES (?, ?, 1, 1, 1)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    average_rating = ROUND(
+                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
+                        / (trust_profile.review_count + 1), 1),
+                    review_count = trust_profile.review_count + 1,
+                    completed_activity_count = trust_profile.completed_activity_count + 1,
+                    review_silent_vote_count = trust_profile.review_silent_vote_count + 1
+                """, userId, rating);
+        } else {
+            jdbcTemplate.update("""
+                INSERT INTO trust_profile
+                    (user_id, average_rating, review_count, completed_activity_count, review_light_chat_vote_count)
+                VALUES (?, ?, 1, 1, 1)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    average_rating = ROUND(
+                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
+                        / (trust_profile.review_count + 1), 1),
+                    review_count = trust_profile.review_count + 1,
+                    completed_activity_count = trust_profile.completed_activity_count + 1,
+                    review_light_chat_vote_count = trust_profile.review_light_chat_vote_count + 1
+                """, userId, rating);
         }
     }
 
     // 노쇼 신고 결과를 trust_profile에 반영 — completed_activity_count는 올리지 않는다
     // (실제로 못 만났다는 신고니까 "완료한 활동"으로 칠 수 없음).
+    // applyReviewToTrustProfile()과 동일한 이유로 upsert 사용.
     private void incrementNoShowCount(Long userId) {
-        int updatedRows = jdbcTemplate.update(
-                "UPDATE trust_profile SET no_show_report_count = no_show_report_count + 1 WHERE user_id = ?",
-                userId
-        );
-
-        if (updatedRows == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO trust_profile (user_id, no_show_report_count) VALUES (?, 1)",
-                    userId
-            );
-        }
+        jdbcTemplate.update("""
+            INSERT INTO trust_profile (user_id, no_show_report_count)
+            VALUES (?, 1)
+            ON CONFLICT (user_id) DO UPDATE SET
+                no_show_report_count = trust_profile.no_show_report_count + 1
+            """, userId);
     }
 }

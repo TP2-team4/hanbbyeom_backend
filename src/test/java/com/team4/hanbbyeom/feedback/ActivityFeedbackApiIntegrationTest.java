@@ -205,4 +205,35 @@ public class ActivityFeedbackApiIntegrationTest {
                 "SELECT no_show_report_count FROM trust_profile WHERE user_id = ?", Integer.class, userBId);
         assertThat(noShowCount).isEqualTo(1);
     }
+
+    // 6. 이미 trust_profile 행이 있는(=후기를 한 번 받아본) 사용자가 후기를 하나 더 받으면
+    //    누적 평균이 제대로 갱신되는지 확인한다.
+    //    위의 다른 테스트들은 전부 trust_profile 행이 없는 상태(첫 활동)에서 시작해서
+    //    applyReviewToTrustProfile()의 upsert가 항상 INSERT 경로만 타므로, 누적 평균 계산식
+    //    (ROUND((avg*count+new)/(count+1),1))이 들어가는 DO UPDATE 경로는 이 테스트가 없으면
+    //    한 번도 실행되지 않는다 (PR #83 리뷰로 발견된 커버리지 공백).
+    @Test
+    void 이미_후기가_있는_사용자가_후기를_더_받으면_평균이_누적_갱신된다() throws Exception {
+        // userB가 이전에 SILENT 4점 후기를 하나 받아본 상태를 직접 세팅
+        jdbcTemplate.update("""
+                INSERT INTO trust_profile
+                    (user_id, average_rating, review_count, completed_activity_count, review_silent_vote_count)
+                VALUES (?, 4.0, 1, 1, 1)
+                """, userBId);
+
+        ReviewCreateRequest request = new ReviewCreateRequest(5, TalkLevel.SILENT, null);
+        mockMvc.perform(post("/api/matching/matches/{id}/review", endedActivityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(userAId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        var profile = jdbcTemplate.queryForMap(
+                "SELECT average_rating, review_count, completed_activity_count, review_silent_vote_count " +
+                        "FROM trust_profile WHERE user_id = ?", userBId);
+        assertThat(((Number) profile.get("average_rating")).doubleValue()).isEqualTo(4.5);
+        assertThat(profile.get("review_count")).isEqualTo(2);
+        assertThat(profile.get("completed_activity_count")).isEqualTo(2);
+        assertThat(profile.get("review_silent_vote_count")).isEqualTo(2);
+    }
 }
