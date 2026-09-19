@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;
 import com.team4.hanbbyeom.user.dto.UserPreferencesUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserResponse;
+import com.team4.hanbbyeom.user.dto.UserWithdrawRequest;
 import com.team4.hanbbyeom.user.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -74,18 +75,21 @@ public class UserController {
     }
 
     // 회원 탈퇴: POST /api/users/me/withdraw
-    // 요청/응답 바디 없음. 탈퇴 즉시 개인정보가 NULL로 지워지므로, 지금 쓰고 있는 access token으로
+    // 요청 바디로 현재 비밀번호를 받아 본인 확인을 한다. 응답 바디는 없음.
+    // 탈퇴 즉시 개인정보가 NULL로 지워지므로, 지금 쓰고 있는 access token으로
     // 다음 요청부터는 401이 난다(findByIdAndDeletedAtIsNull이 JWT 인증 필터에서도 쓰이므로).
     @Operation(
             summary = "회원 탈퇴",
-            description = "인증된 사용자 본인 계정을 탈퇴 처리합니다. 이메일·비밀번호·닉네임·기본 대화 수준이 "
-                    + "모두 제거되며, 탈퇴 후에는 같은 이메일로 재가입할 수 있습니다. 되돌릴 수 없습니다."
+            description = "인증된 사용자 본인 계정을 탈퇴 처리합니다. 현재 비밀번호를 다시 확인하며, 일치하지 않으면 "
+                    + "403으로 거부됩니다. 이메일·비밀번호·닉네임·기본 대화 수준이 모두 제거되며, "
+                    + "탈퇴 후에는 같은 이메일로 재가입할 수 있습니다. 되돌릴 수 없습니다."
     )
     @PostMapping("/me/withdraw")
     public ResponseEntity<Void> withdraw(
-            @AuthenticationPrincipal CustomUserDetails principal
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Valid @RequestBody UserWithdrawRequest request
     ) {
-        userService.withdraw(principal.getUserId());
+        userService.withdraw(principal.getUserId(), request.password());
         return ResponseEntity.noContent().build();
     }
 }
