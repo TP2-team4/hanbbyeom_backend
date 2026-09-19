@@ -77,7 +77,7 @@ public class MatchDecisionService {
                 Boolean.class, applicant.getUserId()
         );
         if (Boolean.TRUE.equals(applicantWithdrawn)) {
-            throw new MatchRequestNotSearchingException("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요.");
+            throw new ApplicantWithdrawnException("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요.");
         }
 
         // 5) 호스트 참여 상태 ACCEPTED로, activity_match를 CONFIRMED로 전이하며 현장 확인 코드 발급

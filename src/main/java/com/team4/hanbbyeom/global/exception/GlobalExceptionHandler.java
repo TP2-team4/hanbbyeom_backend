@@ -111,6 +111,15 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage()));
     }
 
+    // MATCHING: 탈퇴한 신청자의 신청을 수락하려는 경우 처리
+    // 수락은 막고 거절은 가능하므로, 호스트가 사유와 다음 행동을 알 수 있게 메시지를 그대로 응답
+    @ExceptionHandler(ApplicantWithdrawnException.class)
+    public ResponseEntity<ErrorResponse> handleApplicantWithdrawn(ApplicantWithdrawnException e) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
     // MATCHING: 매칭 참가자 권한 없음 처리
     @ExceptionHandler(NotMatchParticipantException.class)
     public ResponseEntity<ErrorResponse> handleNotMatchParticipant(NotMatchParticipantException e) {

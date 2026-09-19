@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
+import com.team4.hanbbyeom.matching.exception.ApplicantWithdrawnException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
@@ -359,7 +360,7 @@ class MatchDecisionServiceTest {
         withdrawUser(applicantUserId);
 
         assertThatThrownBy(() -> matchDecisionService.accept(hostUserId, activityMatchId))
-                .isInstanceOf(MatchRequestNotSearchingException.class)
+                .isInstanceOf(ApplicantWithdrawnException.class)
                 .hasMessage("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요.");
 
         // 확정되지 않았고, 호스트 게시글도 MATCHED로 넘어가지 않았다

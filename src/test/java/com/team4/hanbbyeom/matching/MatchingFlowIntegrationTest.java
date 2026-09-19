@@ -507,4 +507,53 @@ class MatchingFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
     }
+
+    // 회귀 테스트: 탈퇴한 신청자의 신청을 호스트가 수락하면 서버 오류(500)가 아니라 사유가 담긴 409로
+    // 응답해야 한다. 예외를 던지는 것만으로는 GlobalExceptionHandler에 매핑이 없으면 500이 되므로
+    // 실제 HTTP 응답으로 확인한다(PR #81 리뷰 피드백).
+    @Test
+    @DisplayName("탈퇴한 신청자의 신청을 수락하면 사유가 담긴 409를 반환하고, 거절은 가능하다")
+    void 탈퇴한_신청자의_신청을_수락하면_409를_반환한다() throws Exception {
+        Long hostUserId = createUser("호스트");
+        Long applicantUserId = createUser("탈퇴할신청자");
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(applicantUserId)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+        entityManager.flush();
+
+        // 신청 후 신청자 탈퇴 (chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                applicantUserId
+        );
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/accept", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요."));
+
+        // 안내대로 거절하면 정상 처리되고 게시글이 다시 모집 중이 된다
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/reject", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId)))
+                .andExpect(status().is2xxSuccessful());
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
+    }
 }
