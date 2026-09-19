@@ -71,6 +71,9 @@ public class TrustProfileLookupService {
     // 후기인지"(코스명/거리)까지 같이 내려준다. activity_match는 신청 시점 스냅샷을
     // 그대로 갖고 있어서(course_name/distance_min_meters/distance_max_meters) 다른
     // 테이블을 더 조인할 필요가 없다. 최신순(created_at DESC)으로 최대 N건만 가져온다.
+    // created_at만으로 정렬하면 같은 시각에 생성된 후기가 있을 때 LIMIT 경계에서 매번
+    // 다른 행이 걸릴 수 있어서, id DESC를 타이브레이커로 추가했다 (PR #91 리뷰로 발견 —
+    // 팀이 PR #79/#88에서도 같은 이유로 id를 보조 정렬 기준에 추가해온 것과 동일한 패턴).
     private List<RecentReviewResponse> findRecentReviews(Long userId) {
         return jdbcTemplate.query(
                 """
@@ -79,7 +82,7 @@ public class TrustProfileLookupService {
                 FROM activity_review ar
                 JOIN activity_match am ON am.id = ar.activity_match_id
                 WHERE ar.reviewee_user_id = ?
-                ORDER BY ar.created_at DESC
+                ORDER BY ar.created_at DESC, ar.id DESC
                 LIMIT ?
                 """,
                 (rs, rowNum) -> new RecentReviewResponse(
