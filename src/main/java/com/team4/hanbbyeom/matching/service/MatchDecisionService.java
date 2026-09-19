@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +27,9 @@ public class MatchDecisionService {
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final JdbcTemplate jdbcTemplate;
+    // 시각 판단(응답 기한 경과, 활동 종료 여부 등)은 TimeConfig의 Clock 빈을 통해서만 한다 —
+    // 테스트에서 시계를 고정할 수 있게 하기 위함 (채팅 도메인과 동일한 방식, #94)
+    private final Clock clock;
     // 현장 확인 코드 생성용 — 향후 참석 인증 수단으로 쓰일 가능성을 고려해 예측 불가능한
     // SecureRandom을 사용한다(ThreadLocalRandom은 암호학적으로 안전하지 않음).
     private final SecureRandom secureRandom = new SecureRandom();
@@ -33,11 +37,13 @@ public class MatchDecisionService {
     public MatchDecisionService(MatchRequestRepository matchRequestRepository,
                                 ActivityMatchRepository activityMatchRepository,
                                 MatchParticipantRepository matchParticipantRepository,
-                                JdbcTemplate jdbcTemplate) {
+                                JdbcTemplate jdbcTemplate,
+                                Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 호스트가 신청을 수락 - CONFIRMED 전이 + meeting_code 발급 + 양쪽 게시글 MATCHED(신청자는 본인 게시글이 있을 때만)
@@ -170,7 +176,7 @@ public class MatchDecisionService {
         }
 
         ActivityMatchStatus previousStatus = activityMatch.getStatus();
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         // 활동 시작 전이면 모집 중으로 되돌리고, 이미 시작됐으면 닫는다(위 주석 참고)
         MatchRequestStatus requestStatusIfNotEnded = now.isBefore(activityMatch.getScheduledAt())
                 ? MatchRequestStatus.SEARCHING
@@ -216,7 +222,7 @@ public class MatchDecisionService {
     public void expireOverdue() {
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         var overdueMatches = activityMatchRepository.findByStatusAndDecisionExpiresAtBefore(
                 ActivityMatchStatus.PROPOSED, now);
 
@@ -262,7 +268,7 @@ public class MatchDecisionService {
     public void endOverdueActivities() {
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         var overdueMatches = activityMatchRepository.findByStatusAndScheduledEndAtBefore(
                 ActivityMatchStatus.CONFIRMED, now);
 
@@ -312,7 +318,7 @@ public class MatchDecisionService {
     // 상태만 보고 시각을 안 보면 기한이 지난 매칭도 수락/거절될 수 있었음.
     private void ensureRespondable(ActivityMatch activityMatch) {
         boolean alreadyDecided = activityMatch.getStatus() != ActivityMatchStatus.PROPOSED;
-        boolean deadlinePassed = !OffsetDateTime.now().isBefore(activityMatch.getDecisionExpiresAt());
+        boolean deadlinePassed = !OffsetDateTime.now(clock).isBefore(activityMatch.getDecisionExpiresAt());
         if (alreadyDecided || deadlinePassed) {
             throw new MatchRequestNotSearchingException("이미 응답했거나 종료된 매칭이에요.");
         }

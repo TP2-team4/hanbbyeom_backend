@@ -34,15 +34,19 @@ public class MatchRequestBoardService {
     private final MatchParticipantRepository matchParticipantRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final JdbcTemplate jdbcTemplate;
+    // "오늘/내일/이번 주말" 날짜 프리셋 계산은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    private final Clock clock;
 
     public MatchRequestBoardService(MatchRequestRepository matchRequestRepository,
                                     MatchParticipantRepository matchParticipantRepository,
                                     ActivityMatchRepository activityMatchRepository,
-                                    JdbcTemplate jdbcTemplate) {
+                                    JdbcTemplate jdbcTemplate,
+                                    Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 모집 탭 목록 조회 — 읽기 전용이라 상태 전이는 없다. 필터는 전부 선택적(null 허용)이며,
@@ -88,7 +92,10 @@ public class MatchRequestBoardService {
             return new OffsetDateTime[]{null, null};
         }
         ZoneId zone = ZoneId.of("Asia/Seoul");
-        LocalDate today = LocalDate.now(zone);
+        // clock은 UTC 기준이라(TimeConfig 참고) 서울 기준 "오늘"은 instant에 zone을 입혀서 구한다.
+        // clock.withZone(zone) 대신 instant()만 쓰는 이유: 테스트에서 Clock을 Mockito 목으로 바꾸고
+        // instant()/getZone()만 스텁하는 패턴(ChatMessageIntegrationTest)에서 withZone()은 null을 돌려준다.
+        LocalDate today = LocalDate.ofInstant(clock.instant(), zone);
 
         LocalDate from;
         LocalDate to;
