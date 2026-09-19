@@ -39,4 +39,17 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     WHERE p.userId = :userId AND p.releasedAt IS NULL
     """)
     Optional<Long> findActiveActivityMatchIdByUserId(@Param("userId") Long userId);
+
+    // 매칭 상세 응답에 표시할 상대 사용자 닉네임 조회
+    // matching이 user 도메인을 직접 참조하지 않도록 네이티브 쿼리로 users를 조인
+    // 탈퇴해도 users 행은 남고 nickname만 NULL이 되므로 그대로 null 반환
+    @Query(value = """
+            SELECT u.nickname
+            FROM match_participant p
+            JOIN users u ON u.id = p.user_id
+            WHERE p.activity_match_id = :activityMatchId
+              AND p.user_id = :userId
+            """, nativeQuery = true)
+    String findNicknameByActivityMatchIdAndUserId(@Param("activityMatchId") Long activityMatchId,
+                                                  @Param("userId") Long userId);
 }
