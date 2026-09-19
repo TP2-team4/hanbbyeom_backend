@@ -5,11 +5,13 @@ import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.dto.ActivityMatchStatusResponse;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
+import com.team4.hanbbyeom.matching.dto.MyActivityResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.service.ActivityHistoryService;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,15 +34,32 @@ public class ActivityMatchController {
     private final MatchParticipantRepository matchParticipantRepository;
     private final TrustProfileLookupService trustProfileLookupService;
     private final MatchDecisionService matchDecisionService;
+    private final ActivityHistoryService activityHistoryService;
 
     public ActivityMatchController(ActivityMatchRepository activityMatchRepository,
                                    MatchParticipantRepository matchParticipantRepository,
                                    TrustProfileLookupService trustProfileLookupService,
-                                   MatchDecisionService matchDecisionService) {
+                                   MatchDecisionService matchDecisionService,
+                                   ActivityHistoryService activityHistoryService) {
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.trustProfileLookupService = trustProfileLookupService;
         this.matchDecisionService = matchDecisionService;
+        this.activityHistoryService = activityHistoryService;
+    }
+
+    // 내 활동 이력 전체 목록(마이페이지 → 활동 이력 전체 보기). 내 모집글 목록(GET /api/matching/requests)과
+    // 같이 재매핑 없이 원본 상태와 후기·신고 제출 여부를 그대로 내려주고, 화면 칩·탭 판정은 프론트가 한다.
+    @Operation(summary = "내 활동 이력 목록 조회",
+            description = "내가 참가자이면서 한 번이라도 확정된 매칭(CONFIRMED/ENDED/CANCELLED)의 전체 목록을 활동 " +
+                    "시작 시각 최신순으로 반환합니다. 신청 대기·거절·만료처럼 확정된 적 없는 매칭은 포함되지 않습니다. " +
+                    "status는 원본 상태이고 submittedFeedbackType은 내가 제출한 후기(REVIEW)·노쇼 신고(NO_SHOW_REPORT)이며, " +
+                    "아무것도 제출하지 않았으면 null입니다. 상대가 탈퇴했다면 counterpartNickname은 null입니다.")
+    @GetMapping
+    public List<MyActivityResponse> getMyActivities(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return activityHistoryService.getMyActivities(principal.getUserId());
     }
 
     // 신청자·호스트 둘 다 조회 가능한 매칭 상세·상태 조회
