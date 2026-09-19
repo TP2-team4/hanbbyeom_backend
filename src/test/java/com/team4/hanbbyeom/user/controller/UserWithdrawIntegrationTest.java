@@ -462,7 +462,7 @@ class UserWithdrawIntegrationTest {
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.MATCHED);
     }
 
-    // ---- 활동 종료 시각 경계 ---------------------------------------------------------------
+    // ---- 활동 시각 경계(시작 전 / 시작 후·종료 전 / 종료 후) ------------------------------------------
     // 종료 시각은 지났지만 1분 주기 스케줄러(endOverdueActivities())가 아직 처리하지 않은 CONFIRMED 매칭은
     // 이미 끝난 활동이다. 취소로 바꾸거나 지난 일정의 게시글을 다시 모집 중으로 되돌리면 안 된다.
     // chk_activity_match_time(created_at < decision_expires_at < scheduled_at < scheduled_end_at)을 지키도록
@@ -499,9 +499,11 @@ class UserWithdrawIntegrationTest {
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
     }
 
+    // 활동이 이미 시작된 게시글을 SEARCHING으로 되돌리면 모집 탭에는 보이지만 apply()의 응답 기한 계산
+    // (시작 1시간 전까지)에 걸려 신청할 수 없는 글이 된다. 그래서 시작 후에는 CLOSED로 둔다.
     @Test
-    @DisplayName("활동이 진행 중(종료 시각 전)인 확정 매칭은 탈퇴 시 CANCELLED로, 게시글은 SEARCHING으로 처리한다")
-    void 종료_시각_전인_확정_매칭은_CANCELLED로_정리된다() throws Exception {
+    @DisplayName("활동이 시작된 뒤 종료 전인 확정 매칭은 탈퇴 시 CANCELLED로, 게시글은 SEARCHING이 아니라 CLOSED로 처리한다")
+    void 시작_후_종료_전_확정_매칭은_CANCELLED와_게시글_CLOSED로_정리된다() throws Exception {
         User host = createUser("host-i-" + UUID.randomUUID() + "@example.com");
         User applicant = createUser("app-i-" + UUID.randomUUID() + "@example.com");
         MatchRequest hostPost = createHostPost(host.getId());
@@ -511,9 +513,47 @@ class UserWithdrawIntegrationTest {
 
         withdrawSuccessfully(applicant.getId());
 
+        ActivityMatch match = activityMatchRepository.findById(matchId).orElseThrow();
+        assertThat(match.getStatus()).isEqualTo(ActivityMatchStatus.CANCELLED); // 아직 끝난 활동이 아니라 취소
+        assertThat(match.getClosedByUserId()).isNull();
+        assertThat(matchParticipantRepository.findByActivityMatchId(matchId))
+                .allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("활동 시작 전인 확정 매칭은 탈퇴 시 CANCELLED로, 게시글은 SEARCHING으로 처리한다")
+    void 시작_전_확정_매칭은_CANCELLED와_게시글_SEARCHING으로_정리된다() throws Exception {
+        User host = createUser("host-b-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-b-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        confirm(host.getId(), matchId);
+        moveActivityTimes(matchId, "1 hour", "3 hours"); // 아직 시작 전(경계에 가깝게 1시간 뒤 시작)
+
+        withdrawSuccessfully(applicant.getId());
+
         assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
                 .isEqualTo(ActivityMatchStatus.CANCELLED);
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    // PROPOSED도 같은 규칙이다. 스케줄러가 멈춰 응답 기한이 지난 채 활동 시각까지 지나간 신청 대기 매칭이
+    // 탈퇴 시 정리되더라도, 이미 시작된 활동의 게시글을 모집 중으로 되돌리지 않는다.
+    @Test
+    @DisplayName("활동이 이미 시작된 신청 대기 매칭은 탈퇴 시 EXPIRED로, 게시글은 SEARCHING이 아니라 CLOSED로 처리한다")
+    void 시작_후_신청_대기_매칭은_EXPIRED와_게시글_CLOSED로_정리된다() throws Exception {
+        User host = createUser("host-ps-" + UUID.randomUUID() + "@example.com");
+        User applicant = createUser("app-ps-" + UUID.randomUUID() + "@example.com");
+        MatchRequest hostPost = createHostPost(host.getId());
+        Long matchId = applyTo(hostPost.getId(), applicant.getId());
+        moveActivityTimes(matchId, "-1 hour", "1 hour");
+
+        withdrawSuccessfully(applicant.getId());
+
+        assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.EXPIRED);
+        assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
     }
 
     // ---- 탈퇴 비밀번호 72바이트 상한(로그인·회원가입과 동일) ---------------------------------------

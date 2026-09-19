@@ -148,8 +148,13 @@ public class MatchDecisionService {
     // PROPOSED는 expireOverdue()가 기한 후에 하던 처리를 탈퇴 시점으로 앞당기는 것이라 기존 expire()를
     // 재사용한다(신청자 화면에서도 거절과 동일하게 보임). CONFIRMED는 예정 종료 시각 전이면 CANCELLED로 닫고,
     // 이미 지났으면 스케줄러가 했을 ENDED로 닫는다. 참가 연결은 어느 경우든 해제한다.
-    // 게시글은 매칭이 무산된 경우(PROPOSED·진행 전/중 CONFIRMED)에만 SEARCHING으로 되돌려 상대가 즉시 다시
-    // 모집할 수 있게 하고, 정상 종료된 활동은 endOverdueActivities()처럼 CLOSED로 둔다.
+    //
+    // 게시글 상태는 활동 시각으로 정한다 — 게시글을 SEARCHING(모집 탭 재노출)으로 되돌리는 것은 활동 시작 전뿐이다.
+    // 이미 시작된 활동의 게시글이 다시 노출되면 목록에는 보이지만 apply()의 응답 기한 계산(시작 1시간 전까지)에
+    // 걸려 신청할 수 없는 글이 되기 때문이다.
+    //   시작 전                  : PROPOSED→EXPIRED / CONFIRMED→CANCELLED, 게시글 SEARCHING(상대가 즉시 다시 모집)
+    //   시작 후 · 종료 전        : CONFIRMED→CANCELLED, 게시글 CLOSED
+    //   종료 후(스케줄러 처리 전): CONFIRMED→ENDED, 게시글 CLOSED (endOverdueActivities()가 했을 처리)
     private void closeActiveMatchByWithdrawal(Long activityMatchId) {
         ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
                 .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
@@ -165,21 +170,25 @@ public class MatchDecisionService {
         }
 
         ActivityMatchStatus previousStatus = activityMatch.getStatus();
+        OffsetDateTime now = OffsetDateTime.now();
+        // 활동 시작 전이면 모집 중으로 되돌리고, 이미 시작됐으면 닫는다(위 주석 참고)
+        MatchRequestStatus requestStatusIfNotEnded = now.isBefore(activityMatch.getScheduledAt())
+                ? MatchRequestStatus.SEARCHING
+                : MatchRequestStatus.CLOSED;
         MatchRequestStatus requestStatusAfter; // 양쪽 게시글이 정리 후 가게 될 상태
         switch (previousStatus) {
             case PROPOSED -> {
                 activityMatch.expire();
-                requestStatusAfter = MatchRequestStatus.SEARCHING;
+                requestStatusAfter = requestStatusIfNotEnded;
             }
             case CONFIRMED -> {
-                if (OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt())) {
-                    // 아직 끝나지 않은 확정 매칭 — 더 이상 성사될 수 없으므로 취소하고 상대가 다시 모집할 수 있게 한다
+                if (now.isBefore(activityMatch.getScheduledEndAt())) {
+                    // 아직 끝나지 않은 확정 매칭 — 더 이상 성사될 수 없으므로 취소한다
                     activityMatch.cancelByWithdrawal();
-                    requestStatusAfter = MatchRequestStatus.SEARCHING;
+                    requestStatusAfter = requestStatusIfNotEnded;
                 } else {
                     // 활동 종료 시각은 지났는데 1분 주기 스케줄러(endOverdueActivities())가 아직 처리하기 전인 건.
-                    // 이미 끝난 활동을 취소로 바꾸거나 지난 일정의 게시글을 다시 모집 중으로 되돌리면 안 되므로,
-                    // 스케줄러가 했을 처리(ENDED + 게시글 CLOSED)를 그대로 앞당긴다.
+                    // 이미 끝난 활동을 취소로 바꾸면 안 되므로, 스케줄러가 했을 처리(ENDED + 게시글 CLOSED)를 앞당긴다.
                     activityMatch.end();
                     requestStatusAfter = MatchRequestStatus.CLOSED;
                 }
