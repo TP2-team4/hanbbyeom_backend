@@ -105,4 +105,16 @@ public class User {
     public void changeDefaultTalkLevel(DefaultTalkLevel defaultTalkLevel) {
         this.defaultTalkLevel = Objects.requireNonNull(defaultTalkLevel);
     }
+
+    // 회원 탈퇴 — 개인정보(이메일/비밀번호 해시/닉네임/기본 대화 수준/이메일 인증 시각)를
+    // 전부 NULL로 지우고 탈퇴 시각을 기록한다. chk_users_account_lifecycle 제약(활성 계정=4개
+    // 필드 전부 NOT NULL, 탈퇴 계정=전부 NULL)과 정확히 대응하도록 설계됐다.
+    public void withdraw() {
+        this.email = null;
+        this.passwordHash = null;
+        this.nickname = null;
+        this.defaultTalkLevel = null;
+        this.emailVerifiedAt = null;
+        this.deletedAt = Instant.now();
+    }
 }

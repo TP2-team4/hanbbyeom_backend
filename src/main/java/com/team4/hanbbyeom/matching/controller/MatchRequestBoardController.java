@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.dto.MatchApplyRequest;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
@@ -73,6 +74,22 @@ public class MatchRequestBoardController {
                 .orElseThrow(() -> new MatchRequestNotFoundException(requestId));
 
         return trustProfileLookupService.lookup(hostRequest.getUserId());
+    }
+
+    // 신청자 본인이 지금까지 넣은 신청 내역 전체 조회 — 화면(26 "내가 신청한 모집")의
+    // 전체/대기 중/수락됨/거절됨/취소함 탭을 status 파라미터로 지원한다. status를 생략하면
+    // 전체가 나온다. 값은 activity_match.status 원본이 아니라 화면 탭에 맞춘
+    // PENDING/ACCEPTED/REJECTED/CANCELLED 4가지다(MyApplicationResponse 주석 참고).
+    @Operation(summary = "내 신청 내역 조회",
+            description = "본인이 지금까지 넣은 신청 내역을 최신순으로 조회합니다. status로 " +
+                    "PENDING(대기 중)/ACCEPTED(수락됨)/REJECTED(거절됨)/CANCELLED(취소함) 중 하나를 " +
+                    "지정하면 그 상태만 걸러서 보여주고, 생략하면 전체를 보여줍니다.")
+    @GetMapping("/applications")
+    public List<MyApplicationResponse> getMyApplications(
+            @RequestParam(required = false) String status,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return matchApplyService.getMyApplications(principal.getUserId(), status);
     }
 
     // requestId(호스트 게시글)에 신청 — 요청 바디(MatchApplyRequest)는 필드가 없는 빈 값이라

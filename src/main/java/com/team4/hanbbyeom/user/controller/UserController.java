@@ -1,9 +1,12 @@
 package com.team4.hanbbyeom.user.controller;
 
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
+import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;
 import com.team4.hanbbyeom.user.dto.UserPreferencesUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserResponse;
+import com.team4.hanbbyeom.user.dto.UserWithdrawRequest;
 import com.team4.hanbbyeom.user.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -11,11 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 // 사용자 본인 정보 조회 및 기본 설정 변경 API
 @Tag(name = "User", description = "사용자 본인 정보 및 기본 설정 API")
@@ -26,10 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final TrustProfileLookupService trustProfileLookupService;
 
     // 설정 변경에는 DB에서 관리 중인 User Entity가 필요하므로 UserService를 통해 처리
-    public UserController(UserService userService) {
+    public UserController(UserService userService, TrustProfileLookupService trustProfileLookupService) {
         this.userService = userService;
+        this.trustProfileLookupService = trustProfileLookupService;
     }
 
     // 내 정보 조회: GET /api/users/me
@@ -75,5 +76,39 @@ public class UserController {
                 .updatePreferences(principal.getUserId(), request);
 
         return ResponseEntity.ok(response);
+    }
+
+    // 내 신뢰도 프로필 조회: GET /api/users/me/trust-profile
+    // 실제 조회 로직은 TrustProfileLookupService가 이미 갖고 있다 — 지금까지는
+    // 호스트/신청자 프로필 조회(다른 사람 대상)에서만 쓰였는데, 본인 조회용 경로가 없었다.
+    @Operation(
+            summary = "내 신뢰도 프로필 조회",
+            description = "인증된 사용자 본인의 평균 별점·완료한 활동·노쇼 신고 횟수를 조회합니다. "
+                    + "활동 이력이 전혀 없으면 기본값(0, null)이 반환됩니다."
+    )
+    @GetMapping("/me/trust-profile")
+    public ResponseEntity<TrustProfileResponse> myTrustProfile(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return ResponseEntity.ok(trustProfileLookupService.lookup(principal.getUserId()));
+    }
+
+    // 회원 탈퇴: POST /api/users/me/withdraw
+    // 요청 바디로 현재 비밀번호를 받아 본인 확인을 한다. 응답 바디는 없음.
+    // 탈퇴 즉시 개인정보가 NULL로 지워지므로, 지금 쓰고 있는 access token으로
+    // 다음 요청부터는 401이 난다(findByIdAndDeletedAtIsNull이 JWT 인증 필터에서도 쓰이므로).
+    @Operation(
+            summary = "회원 탈퇴",
+            description = "인증된 사용자 본인 계정을 탈퇴 처리합니다. 현재 비밀번호를 다시 확인하며, 일치하지 않으면 "
+                    + "403으로 거부됩니다. 이메일·비밀번호·닉네임·기본 대화 수준이 모두 제거되며, "
+                    + "탈퇴 후에는 같은 이메일로 재가입할 수 있습니다. 되돌릴 수 없습니다."
+    )
+    @PostMapping("/me/withdraw")
+    public ResponseEntity<Void> withdraw(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Valid @RequestBody UserWithdrawRequest request
+    ) {
+        userService.withdraw(principal.getUserId(), request.password());
+        return ResponseEntity.noContent().build();
     }
 }

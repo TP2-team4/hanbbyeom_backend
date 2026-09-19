@@ -55,6 +55,40 @@ class MatchingFlowIntegrationTest {
         );
     }
 
+    // created_at과 decision_expires_at을 DB 서버 시각(CURRENT_TIMESTAMP) 기준으로 함께
+    // 과거로 밀어서 chk_activity_match_time 제약을 지키면서 "이미 지난 기한"을 확정적으로
+    // 만든다. 원래는 decision_expires_at만 created_at + 1ms로 세팅했는데, 테스트가 그 1ms가
+    // 지나기 전에 다음 단계까지 도달할 만큼 빠르게 실행되면 간헐적으로 실패했다
+    // (MatchDecisionServiceTest와 동일한 문제 — 팀원 리뷰로 발견).
+    private void makeDeadlineOverdue(Long activityMatchId) {
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
+    }
+
+    // makeDeadlineOverdue()와 같은 이유로, created_at부터 scheduled_end_at까지 네 시각을 전부
+    // DB 서버 시각 기준 실제 과거로 고정해서 "이미 지난 예정 종료 시각"을 확정적으로 만든다
+    // (MatchDecisionServiceTest.pushScheduledEndAtIntoThePast()와 동일한 패턴).
+    private void pushScheduledEndAtIntoThePast(Long activityMatchId) {
+        jdbcTemplate.update(
+                """
+                UPDATE activity_match
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '4 seconds',
+                    decision_expires_at = CURRENT_TIMESTAMP - INTERVAL '3 seconds',
+                    scheduled_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                    scheduled_end_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                WHERE id = ?
+                """,
+                activityMatchId
+        );
+    }
+
     private String bearerTokenOf(Long userId) {
         return "Bearer " + jwtTokenProvider.createAccessToken(userId);
     }
@@ -190,6 +224,46 @@ class MatchingFlowIntegrationTest {
                 .andExpect(jsonPath("$.message").value("존재하지 않는 매칭이에요."));
     }
 
+    // 회귀 테스트: GET /api/matching/requests/me가 GET /api/matching/requests/{id}(Long)
+    // 패턴에 가려서 "me"를 id로 파싱하려다 400/500이 나지 않는지 확인한다(Spring이 리터럴
+    // 경로를 변수 패턴보다 우선하는 것에 기대는 부분이라 실제 HTTP 요청으로 고정해둔다).
+    // 프론트/QA가 방금 만든 게시글의 Location 헤더를 놓쳤을 때 id 없이도 확인할 수 있게
+    // 추가한 API.
+    @Test
+    @DisplayName("등록 직후 내 활성 모집글을 id 없이 /me로 조회할 수 있다")
+    void 내_활성_모집글을_me_경로로_조회할_수_있다() throws Exception {
+        Long hostUserId = createUser("호스트");
+        String hostToken = bearerTokenOf(hostUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(hostRequestId))
+                .andExpect(jsonPath("$.status").value("SEARCHING"));
+    }
+
+    // 활성 모집글이 아예 없는 유저가 조회하면 404여야 한다(존재하지 않는 id로 조회할 때와
+    // 동일한 예외 타입을 쓰지만, "id=X" 대신 "활성 모집글이 없다"는 메시지를 내려준다).
+    @Test
+    @DisplayName("활성 모집글이 없으면 /me 조회 시 404가 반환된다")
+    void 활성_모집글이_없으면_me_조회시_404를_반환한다() throws Exception {
+        Long userId = createUser("모집글없는사용자");
+
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(userId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("현재 진행 중인 모집글이 없어요."));
+    }
+
     @Test
     @DisplayName("호스트가 거절하면 게시글이 다시 모집 탭에 노출된다")
     void 거절하면_게시글이_다시_노출된다() throws Exception {
@@ -260,15 +334,7 @@ class MatchingFlowIntegrationTest {
                 .andReturn();
         Long activityMatchId = idFromLocationHeader(applyResult);
 
-        // 응답 기한을 created_at 직후로 고정 — chk_activity_match_time 제약(created_at <
-        // decision_expires_at)은 지키면서 확정적으로 "이미 지난 기한"을 만든다
-        // (MatchDecisionServiceTest.pastDeadlineFor()와 동일한 이유).
-        OffsetDateTime createdAt = jdbcTemplate.queryForObject(
-                "SELECT created_at FROM activity_match WHERE id = ?", OffsetDateTime.class, activityMatchId);
-        jdbcTemplate.update(
-                "UPDATE activity_match SET decision_expires_at = ? WHERE id = ?",
-                createdAt.plusNanos(1_000_000), activityMatchId
-        );
+        makeDeadlineOverdue(activityMatchId);
         // raw SQL 업데이트는 JPA 영속성 컨텍스트를 안 거치므로, apply()가 이미 로드해둔
         // ActivityMatch 1차 캐시를 비워야 expireOverdue()가 DB의 최신 값을 다시 읽는다.
         entityManager.clear();
@@ -290,5 +356,204 @@ class MatchingFlowIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("EXPIRED"));
+    }
+
+    // 화면(26 "내가 신청한 모집")이 실제 HTTP 요청+JWT 인증을 거쳐서도 동작하는지, 그리고
+    // status 쿼리 파라미터로 걸러지는지 확인한다. EXPIRED는 신청자 입장에서 REJECTED로
+    // 재매핑된다는 사실도 이 경로로 같이 확인한다(위 테스트는 원본 activity_match.status만 봄).
+    @Test
+    @DisplayName("내 신청 내역을 조회하면 자동 만료된 신청도 REJECTED로 나오고, status로 필터링된다")
+    void 내_신청_내역을_조회하면_상태별로_필터링된다() throws Exception {
+        Long hostUserId = createUser("호스트4");
+        Long applicantUserId = createUser("신청자4");
+        String hostToken = bearerTokenOf(hostUserId);
+        String applicantToken = bearerTokenOf(applicantUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+
+        makeDeadlineOverdue(activityMatchId);
+        entityManager.clear();
+        matchDecisionService.expireOverdue();
+
+        // 전체 조회 — 방금 자동 만료된 신청 1건이 REJECTED로 재매핑돼서 나와야 한다.
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].activityMatchId").value(activityMatchId))
+                .andExpect(jsonPath("$[0].status").value("REJECTED"));
+
+        // status=REJECTED로 필터링하면 그대로 나오고, status=PENDING으로 필터링하면 빈 배열이어야 한다.
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .param("status", "REJECTED")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+
+        mockMvc.perform(get("/api/matching/board/applications")
+                        .param("status", "PENDING")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    // 회귀 테스트: 활동이 자연 종료(ENDED)돼도 호스트 게시글이 MATCHED로 남아 있으면
+    // uq_match_request_active_user 부분 유니크 인덱스와 GET /api/matching/requests/me 양쪽에서
+    // 계속 "활성" 게시글로 취급돼, 활동이 끝난 지 오래된 게시글이 /requests/me에 계속 노출되고
+    // 호스트가 새 게시글을 등록하지도 못했다(팀원 리뷰로 발견). endOverdueActivities()가
+    // 게시글을 CLOSED로 전이하도록 고친 뒤, 실제 HTTP 흐름으로 두 가지를 확인한다.
+    @Test
+    @DisplayName("활동 종료 후 모집글이 CLOSED로 전이되어 /requests/me에서 빠지고 새 모집글을 등록할 수 있다")
+    void 활동_종료_후_모집글이_CLOSED로_전이되고_새_모집글_등록이_가능하다() throws Exception {
+        Long hostUserId = createUser("호스트5");
+        Long applicantUserId = createUser("신청자5");
+        String hostToken = bearerTokenOf(hostUserId);
+        String applicantToken = bearerTokenOf(applicantUserId);
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/accept", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isOk());
+        // accept()가 남긴 변경(status=CONFIRMED 등)을 DB에 반영해둔다 — 안 그러면 바로 아래
+        // raw SQL 업데이트가 실행되는 시점에도 DB엔 아직 PROPOSED로 남아 있어서, endOverdueActivities()의
+        // findByStatusAndScheduledEndAtBefore(CONFIRMED, ...) 조회에 이 건이 안 걸린다.
+        entityManager.flush();
+
+        pushScheduledEndAtIntoThePast(activityMatchId);
+        entityManager.clear();
+        matchDecisionService.endOverdueActivities();
+
+        // 활동이 끝난 게시글은 더 이상 /requests/me에 나오면 안 된다(CLOSED로 전이됐으므로).
+        mockMvc.perform(get("/api/matching/requests/me")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken))
+                .andExpect(status().isNotFound());
+
+        // 활성 게시글이 없어졌으니 같은 호스트가 새 게시글을 다시 등록할 수 있어야 한다
+        // (uq_match_request_active_user에 더 이상 걸리지 않아야 함).
+        mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, hostToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("망원 한강공원 앞 (재등록)")))
+                .andExpect(status().isCreated());
+    }
+
+    // 회귀 테스트: 탈퇴한 작성자의 SEARCHING 모집글이 모집 탭에 남아 있으면 안 된다.
+    // 탈퇴 시 users.nickname이 NULL로 지워지는데 글은 그대로 남아, 닉네임 없는 글이 노출되던 문제
+    // (PR #81 리뷰 피드백으로 발견).
+    @Test
+    @DisplayName("탈퇴한 작성자의 모집글은 모집 탭 목록에서 제외된다")
+    void 탈퇴한_작성자의_모집글은_목록에서_제외된다() throws Exception {
+        Long hostUserId = createUser("탈퇴할호스트");
+        Long viewerUserId = createUser("조회자");
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        // 탈퇴 전에는 노출된다
+        mockMvc.perform(get("/api/matching/board")
+                        .param("course", "뚝섬 한강공원")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+
+        // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                hostUserId
+        );
+
+        // 글 자체는 SEARCHING으로 남아 있지만 목록에는 나오지 않는다
+        mockMvc.perform(get("/api/matching/board")
+                        .param("course", "뚝섬 한강공원")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
+    }
+
+    // 회귀 테스트: 탈퇴한 신청자의 신청을 호스트가 수락하면 서버 오류(500)가 아니라 사유가 담긴 409로
+    // 응답해야 한다. 예외를 던지는 것만으로는 GlobalExceptionHandler에 매핑이 없으면 500이 되므로
+    // 실제 HTTP 응답으로 확인한다(PR #81 리뷰 피드백).
+    @Test
+    @DisplayName("탈퇴한 신청자의 신청을 수락하면 사유가 담긴 409를 반환하고, 거절은 가능하다")
+    void 탈퇴한_신청자의_신청을_수락하면_409를_반환한다() throws Exception {
+        Long hostUserId = createUser("호스트");
+        Long applicantUserId = createUser("탈퇴할신청자");
+
+        MvcResult createResult = mockMvc.perform(post("/api/matching/requests")
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createRequestJson("뚝섬유원지역 3번 출구")))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long hostRequestId = idFromLocationHeader(createResult);
+        entityManager.flush();
+
+        MvcResult applyResult = mockMvc.perform(post("/api/matching/board/{requestId}/apply", hostRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(applicantUserId)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long activityMatchId = idFromLocationHeader(applyResult);
+        entityManager.flush();
+
+        // 신청 후 신청자 탈퇴 (chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)
+        jdbcTemplate.update(
+                """
+                UPDATE users
+                SET email = NULL, password_hash = NULL, nickname = NULL,
+                    email_verified_at = NULL, default_talk_level = NULL, deleted_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                applicantUserId
+        );
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/accept", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("신청자가 탈퇴해 수락할 수 없어요. 거절하면 다시 모집할 수 있어요."));
+
+        // 안내대로 거절하면 정상 처리되고 게시글이 다시 모집 중이 된다
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/reject", activityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(hostUserId)))
+                .andExpect(status().is2xxSuccessful());
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
     }
 }

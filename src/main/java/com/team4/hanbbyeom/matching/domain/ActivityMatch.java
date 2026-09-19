@@ -69,10 +69,18 @@ public class ActivityMatch {
 
     protected ActivityMatch() {}
 
+    // createdAt을 파라미터로 받는 이유: 여기서 OffsetDateTime.now()를 다시 호출하면, 호출자가
+    // decisionExpiresAt을 계산할 때 쓴 now와 실제로 저장되는 createdAt이 서로 다른(created_at
+    // 쪽이 항상 더 늦은) 시각이 된다. decisionExpiresAt이 now+24시간처럼 큰 여유를 갖던 예전엔
+    // 문제가 안 됐지만, activity 시작 임박 시 decisionExpiresAt이 now에 바짝 붙을 수 있게 되면서
+    // (MatchApplyService.apply() 참고) 그 미세한 시간차만으로 chk_activity_match_time
+    // (created_at < decision_expires_at) 위반이 가능해졌다(팀원 리뷰로 발견한 회귀). 호출자가
+    // 검증에 쓴 시각을 그대로 넘겨받아 createdAt으로 쓰면, 그 가드가 정확히 이 제약도 보장한다.
     public ActivityMatch(OffsetDateTime scheduledAt, OffsetDateTime scheduledEndAt, TalkLevel talkLevel,
                          String location, String courseName, Integer distanceMinMeters, Integer distanceMaxMeters,
                          String routeDescription,
-                         Integer agreedPaceMinSec, Integer agreedPaceMaxSec, OffsetDateTime decisionExpiresAt) {
+                         Integer agreedPaceMinSec, Integer agreedPaceMaxSec, OffsetDateTime decisionExpiresAt,
+                         OffsetDateTime createdAt) {
         this.scheduledAt = scheduledAt;
         this.scheduledEndAt = scheduledEndAt;
         this.talkLevel = talkLevel;
@@ -84,7 +92,7 @@ public class ActivityMatch {
         this.agreedPaceMinSec = agreedPaceMinSec;
         this.agreedPaceMaxSec = agreedPaceMaxSec;
         this.decisionExpiresAt = decisionExpiresAt;
-        this.createdAt = OffsetDateTime.now();
+        this.createdAt = createdAt;
     }
 
     public Long getId() { return id; }
@@ -94,6 +102,10 @@ public class ActivityMatch {
     public OffsetDateTime getClosedAt() { return closedAt; }
     public Long getClosedByUserId() { return closedByUserId; }
     public OffsetDateTime getDecisionExpiresAt() { return decisionExpiresAt; }
+    public OffsetDateTime getScheduledAt() { return scheduledAt; }
+    public OffsetDateTime getScheduledEndAt() { return scheduledEndAt; }
+    public String getLocation() { return location; }
+    public String getCourseName() { return courseName; }
     // 필요한 getter는 계속 추가하세요.
 
     public void confirm(String meetingCode) {
@@ -111,6 +123,16 @@ public class ActivityMatch {
     // 응답 기한(decision_expires_at)을 넘겨 시스템이 자동으로 만료시킬 때 호출.
     public void expire() {
         this.status = ActivityMatchStatus.EXPIRED;
+        this.closedAt = OffsetDateTime.now();
+    }
+
+    // 참가자 탈퇴로 더 이상 성사될 수 없는 확정(CONFIRMED) 매칭을 닫는다.
+    // 노쇼가 아니라 사전 취소이므로 no_show_report_count는 건드리지 않고, 시스템 처리이므로
+    // closedByUserId는 남기지 않는다(expire()와 동일). confirmedAt/meetingCode는 그대로 둔다 —
+    // 채팅이 confirmedAt으로 "한 번이라도 확정된 매칭인지"를 판단해 과거 대화 조회를 유지하기 때문이다.
+    // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다(end()와 동일한 이유).
+    public void cancelByWithdrawal() {
+        this.status = ActivityMatchStatus.CANCELLED;
         this.closedAt = OffsetDateTime.now();
     }
 

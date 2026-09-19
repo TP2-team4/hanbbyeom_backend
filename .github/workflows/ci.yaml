@@ -15,10 +15,10 @@ on:
 permissions:
   contents: read
 
-# 같은 브랜치에 새 커밋이 올라온 경우 이전 실행 취소
+# PR과 dev는 이전 실행 취소, main은 실행 중인 이미지 발행 완료 보장
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build-and-test:
@@ -70,3 +70,41 @@ jobs:
       # 컴파일과 전체 테스트를 함께 수행하는 CI 핵심 단계
       - name: Gradle 빌드 및 테스트
         run: ./gradlew build --no-daemon
+
+  publish-docker-image:
+    name: Docker 이미지 발행
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    # PR과 dev Push 제외, main Push 전용 이미지 발행
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      # Dockerfile과 애플리케이션 소스가 포함된 main 커밋 확인
+      - name: 저장소 코드 확인
+        uses: actions/checkout@v6
+
+      # GitHub Actions 캐시를 사용할 수 있는 Docker Buildx 환경 구성
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v4
+
+      # 계정 비밀번호 대신 Repository Secret에 등록된 Access Token 사용
+      - name: Docker Hub 로그인
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 추적 가능한 전체 커밋 해시 태그와 현재 배포용 latest 태그 동시 발행
+      - name: Docker 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            shppark/hanbbyeom-backend:${{ github.sha }}
+            shppark/hanbbyeom-backend:latest
+          cache-from: type=gha,scope=hanbbyeom-backend
+          cache-to: type=gha,mode=max,scope=hanbbyeom-backend

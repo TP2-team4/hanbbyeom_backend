@@ -15,6 +15,10 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     // MatchApplyService.cancelApplication()에서 "이 매칭의 호스트/신청자가 각각 누구인지" 찾을 때 쓴다.
     List<MatchParticipant> findByActivityMatchId(Long activityMatchId);
 
+    // 채팅 접근 권한 확인용 — 매칭이 끝나 releasedAt이 채워진 참가자도 과거 메시지는
+    // 계속 조회할 수 있어야 하므로 활성 여부 조건 없이 매칭과 사용자 ID만 확인한다.
+    boolean existsByActivityMatchIdAndUserId(Long activityMatchId, Long userId);
+
     // 컨트롤러/프론트가 알고 있는 건 "게시글 id(matchRequestId)"뿐이고, 실제로 상태를 바꿔야 할
     // activity_match의 id는 모르는 상황(신청 취소 API)을 위한 역조회 쿼리.
     // releasedAt IS NULL 조건이 핵심: 한 게시글에 대해 "현재 유효한(아직 안 끝난)" 참여 연결은
@@ -25,4 +29,14 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     WHERE p.matchRequestId = :requestId AND p.releasedAt IS NULL
     """)
     Optional<Long> findActiveActivityMatchIdByMatchRequestId(@Param("requestId") Long requestId);
+
+    // 회원 탈퇴 시 탈퇴자가 지금 참가 중인 activity_match를 찾는 쿼리. 위 쿼리와 같은 releasedAt IS NULL
+    // 패턴을 사용자 기준으로 적용한다. 한 사용자는 동시에 하나의 활성 참여만 가질 수 있다는 DB 제약
+    // (uq_participant_active_user)이 있어 결과는 0건 또는 1건이다. 활성 참여는 PROPOSED(신청 대기)
+    // 또는 CONFIRMED(확정) 상태의 매칭에만 남는다(그 외 상태로 끝나면 release()로 해제됨).
+    @Query("""
+    SELECT p.activityMatchId FROM MatchParticipant p
+    WHERE p.userId = :userId AND p.releasedAt IS NULL
+    """)
+    Optional<Long> findActiveActivityMatchIdByUserId(@Param("userId") Long userId);
 }

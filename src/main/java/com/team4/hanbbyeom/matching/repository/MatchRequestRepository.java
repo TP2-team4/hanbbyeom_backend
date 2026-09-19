@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching.repository;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
+import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,14 +9,22 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long> {
+
+    // 내 활성 모집글/신청 조회(GET /api/matching/requests/me)용 — uq_match_request_active_user
+    // 부분 유니크 인덱스와 동일한 상태 집합(SEARCHING/PENDING_CONFIRMATION/MATCHED)이라
+    // 이 유저에게 활성 행이 있다면 정확히 0건 또는 1건만 나온다.
+    Optional<MatchRequest> findByUserIdAndStatusIn(Long userId, List<MatchRequestStatus> statuses);
 
     // 모집 탭 목록(GET /api/matching/board) 조회용 쿼리.
     // match_request 하나당 코스명/거리/페이스(run_match_condition, running_course)와 작성자
     // 닉네임·신뢰도(users, trust_profile)까지 한 번에 조인해서 화면에 필요한 걸 통째로 가져온다
     // — N+1 없이 목록 화면 하나를 한 번의 쿼리로 채우려는 목적. trust_profile은 아직 활동 이력이
     // 없는 신규 유저면 행 자체가 없을 수 있어 LEFT JOIN(없으면 rating/count는 null로 나옴).
+    // 탈퇴한 작성자(users.deleted_at IS NOT NULL)의 글은 제외한다 — 탈퇴 시 닉네임이 NULL로 지워져도
+    // SEARCHING 상태의 모집글은 그대로 남기 때문에, 이 조건이 없으면 닉네임 없는 글이 목록에 노출된다.
     // WHERE절의 파라미터들은 전부 "값이 없으면(:xxx IS NULL) 그 조건은 무시"하는 선택적 필터이고,
     // 거리/페이스는 정확히 일치가 아니라 "게시글의 범위와 필터 범위가 겹치는지"로 판단한다
     // (예: 필터 minDistance=9000인데 게시글이 5000~8000이면 겹치지 않으므로 제외).
@@ -39,6 +48,7 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     LEFT JOIN trust_profile tp ON tp.user_id = mr.user_id
     WHERE mr.status = 'SEARCHING'
       AND mr.activity_type = 'RUN'
+      AND u.deleted_at IS NULL
       AND mr.user_id <> :excludeUserId
       AND (:course IS NULL OR co.name = :course)
       AND (:talkLevel IS NULL OR mr.talk_level = :talkLevel)
@@ -128,5 +138,37 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getTalkLevel();
         String getStatus();
         Long getUserId();
+    }
+
+    // GET /api/matching/requests (내 모집글 전체 목록)용 조회. findDetailById()와 조인 구조는
+    // 동일하되, 특정 id 하나가 아니라 이 유저가 작성한 모든 상태의 게시글을 최신순으로 가져온다.
+    // 상태 필터링/재매핑은 프론트가 담당하므로 여기서는 status를 그대로 노출한다.
+    @Query(value = """
+        SELECT
+            mr.id AS id,
+            co.name AS courseName,
+            rc.distance_min_meters AS distanceMinMeters,
+            rc.distance_max_meters AS distanceMaxMeters,
+            mr.scheduled_at AS scheduledAt,
+            mr.talk_level AS talkLevel,
+            mr.status AS status
+        FROM match_request mr
+        JOIN run_match_condition rc ON rc.match_request_id = mr.id
+        JOIN running_course co ON co.id = rc.course_id
+        WHERE mr.user_id = :userId
+        ORDER BY mr.created_at DESC, mr.id DESC
+        """, nativeQuery = true)
+    List<MyPostRow> findMyPosts(@Param("userId") Long userId);
+
+    // 위 쿼리 결과 한 행을 매핑하는 프로젝션 — findDetailById()의 MatchRequestDetailRow와
+    // 같은 패턴(SELECT의 AS 별칭과 getter 이름이 대응).
+    interface MyPostRow {
+        Long getId();
+        String getCourseName();
+        Integer getDistanceMinMeters();
+        Integer getDistanceMaxMeters();
+        Instant getScheduledAt();
+        String getTalkLevel();
+        String getStatus();
     }
 }

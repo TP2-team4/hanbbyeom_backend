@@ -1,10 +1,7 @@
 package com.team4.hanbbyeom.matching.controller;
 
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
-import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
-import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
-import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
-import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
+import com.team4.hanbbyeom.matching.dto.*;
 import com.team4.hanbbyeom.matching.service.MatchRequestBoardService;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.List;
 
 @Tag(name = "Matching - Requests", description = "모집글 등록/조회/수정/취소 API")
 // Swagger UI에서 Authorize로 입력한 Bearer 토큰을 이 API 호출에 사용 (SwaggerConfig에 정의)
@@ -45,6 +43,30 @@ public class MatchRequestController {
     ) {
         Long id = matchRequestCommandService.create(principal.getUserId(), request);
         return ResponseEntity.created(URI.create("/api/matching/requests/" + id)).build();
+    }
+
+    // 내가 등록한 모집글 전체 목록 조회 — 상태별 필터링/화면 탭 매핑은 프론트에서 처리한다.
+    @Operation(summary = "내 모집글 전체 목록 조회",
+            description = "현재 로그인한 사용자가 지금까지 등록한 모든 모집글을 최신순으로 조회합니다. " +
+                    "상태 필터링은 프론트에서 처리합니다.")
+    @GetMapping
+    public List<MyPostResponse> getMyPosts(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return matchRequestBoardService.getMyPosts(principal.getUserId());
+    }
+
+    // 내가 지금 갖고 있는 활성 모집글/신청 1건 조회 — 등록 직후 응답의 Location 헤더를
+    // 놓쳤거나 id를 모를 때도, 본인 토큰만으로 "지금 내 글이 뭔지" 바로 확인할 수 있게 한다.
+    // 활성 상태(SEARCHING/PENDING_CONFIRMATION/MATCHED)가 하나도 없으면 404.
+    @Operation(summary = "내 활성 모집글 조회",
+            description = "현재 로그인한 사용자가 갖고 있는 활성 모집글(SEARCHING/PENDING_CONFIRMATION/MATCHED)을 " +
+                    "1건 조회합니다. 없으면 404가 반환됩니다.")
+    @GetMapping("/me")
+    public MatchRequestResponse getMyActiveRequest(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return matchRequestBoardService.getMyActiveRequest(principal.getUserId());
     }
 
     // 모집글 상세 조회 — 목록(board)과 달리 meetingPoint까지 포함하고, 조회자가 작성자
