@@ -2,7 +2,11 @@ package com.team4.hanbbyeom.auth.service;
 
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
+import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
+import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
+import com.team4.hanbbyeom.user.domain.User;
+import com.team4.hanbbyeom.user.repository.UserRepository;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.AopTestUtils;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
@@ -25,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,6 +46,9 @@ class EmailVerificationServiceTest {
 
     @Autowired
     private EmailVerificationRepository emailVerificationRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     // @MockitoBean: 실제 Bean 대신 가짜(Mock) 객체를 만들어서 Spring 컨텍스트에 등록해주는 어노테이션
     // 테스트 중 실제로 메일이 발송되면 안 되므로, JavaMailSender를 가짜로 교체
@@ -57,6 +67,21 @@ class EmailVerificationServiceTest {
     // 테스트마다 겹치지 않는 이메일 생성 (UserRepositoryTest와 동일한 방식)
     private String randomEmail() {
         return "verification-" + UUID.randomUUID() + "@example.com";
+    }
+
+    // PASSWORD_RESET 발송 테스트용 가입 사용자 생성
+    private void saveUser(String email) {
+        String nickname = "테스트" + UUID.randomUUID().toString().substring(0, 8);
+
+        userRepository.save(
+                new User(
+                        email,
+                        "encoded-password",
+                        nickname,
+                        DefaultTalkLevel.SILENT,
+                        Instant.now()
+                )
+        );
     }
 
     // 실제 코드와 매칭될 필요 없이 "유효한 16진수 형식의 해시값"만 있으면 되는 테스트에서 사용
@@ -89,10 +114,11 @@ class EmailVerificationServiceTest {
     }
 
     @Test // 테스트 메서드
-    @DisplayName("인증 코드 발송 성공") // 테스트 결과 화면에서 읽기 좋은 이름으로 보여줌
-    void sendVerificationCode_성공() {
+    @DisplayName("미가입 이메일의 회원가입 인증 코드 발송 성공") // 테스트 결과 화면에서 읽기 좋은 이름으로 보여줌
+    void 회원가입_인증_코드_발송_성공() {
         String email = randomEmail();
 
+        // SIGNUP 목적은 아직 가입하지 않은 이메일에도 기존과 동일하게 발송
         emailVerificationService.sendVerificationCode(email, VerificationPurpose.SIGNUP);
 
         // DB에 인증 기록이 저장됐는지 확인
@@ -110,8 +136,89 @@ class EmailVerificationServiceTest {
     }
 
     @Test
+    @DisplayName("가입 이메일의 비밀번호 재설정 인증 코드 발송 성공")
+    void 비밀번호_재설정_인증_코드_발송_성공() {
+        String email = randomEmail();
+        saveUser(email);
+
+        emailVerificationService.sendVerificationCode(
+                email,
+                VerificationPurpose.PASSWORD_RESET
+        );
+
+        // PASSWORD_RESET 인증 기록 저장과 실제 메일 발송 확인
+        assertTrue(
+                emailVerificationRepository
+                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                                email,
+                                VerificationPurpose.PASSWORD_RESET
+                        )
+                        .isPresent()
+        );
+        verify(mailSender).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("미가입 이메일의 비밀번호 재설정 인증 기록 및 메일 미생성")
+    void 미가입_이메일의_비밀번호_재설정_인증_요청_생략() {
+        String email = randomEmail();
+
+        // 미가입 여부를 응답으로 드러내지 않도록 예외 없이 종료
+        emailVerificationService.sendVerificationCode(
+                email,
+                VerificationPurpose.PASSWORD_RESET
+        );
+
+        // 불필요한 인증 기록과 외부 메일 발송의 미생성 확인
+        assertFalse(
+                emailVerificationRepository
+                        .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                                email,
+                                VerificationPurpose.PASSWORD_RESET
+                        )
+                        .isPresent()
+        );
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 재설정 재발송 제한 중 동일 응답 및 추가 발송 생략")
+    void 비밀번호_재설정_재발송_제한_중_추가_발송_생략() {
+        String email = randomEmail();
+        saveUser(email);
+
+        emailVerificationService.sendVerificationCode(
+                email,
+                VerificationPurpose.PASSWORD_RESET
+        );
+        EmailVerification firstVerification = emailVerificationRepository
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        email,
+                        VerificationPurpose.PASSWORD_RESET
+                )
+                .orElseThrow();
+
+        // 첫 발송 후 60초 이내 요청도 예외 없이 종료
+        emailVerificationService.sendVerificationCode(
+                email,
+                VerificationPurpose.PASSWORD_RESET
+        );
+
+        EmailVerification latestVerification = emailVerificationRepository
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(
+                        email,
+                        VerificationPurpose.PASSWORD_RESET
+                )
+                .orElseThrow();
+
+        // 새로운 인증 기록과 두 번째 메일의 미생성 확인
+        assertEquals(firstVerification.getId(), latestVerification.getId());
+        verify(mailSender, times(1)).send(any(MimeMessage.class));
+    }
+
+    @Test
     @DisplayName("재발송 대기시간 이내 재요청 거부")
-    void sendVerificationCode_재발송_대기시간_거부() {
+    void 회원가입_인증_코드_재발송_대기시간_이내_요청_거부() {
         String email = randomEmail();
 
         emailVerificationService.sendVerificationCode(
@@ -133,7 +240,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("인증 코드 확인 성공")
-    void confirmCode_성공() throws Exception {
+    void 인증_코드_확인_성공() throws Exception {
         String email = randomEmail();
         String rawCode = "123456";
 
@@ -162,7 +269,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("발송 내역이 없는 이메일 확인 시 거부")
-    void confirmCode_발송_내역_없음() {
+    void 발송_내역이_없는_인증_코드_확인_거부() {
         String email = randomEmail();
 
         // 발송 요청 자체를 한 적 없는 이메일로 확인을 시도하는 상황
@@ -182,7 +289,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("만료된 인증 코드 거부")
-    void confirmCode_만료_거부() {
+    void 만료된_인증_코드_확인_거부() {
         String email = randomEmail();
 
         // 이미 만료 시각이 지난 인증 기록을 직접 저장
@@ -208,7 +315,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("잘못된 인증 코드 입력 시 거부 및 실패 횟수 증가")
-    void confirmCode_코드_불일치_거부() {
+    void 잘못된_인증_코드_확인_거부와_실패_횟수_증가() {
         String email = randomEmail();
 
         // 저장된 해시와 다르기만 하면 되므로 DUMMY_CODE_HASH로 충분 (실제 코드의 해시일 필요 없음)
@@ -241,8 +348,45 @@ class EmailVerificationServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("잘못된 인증 코드의 실패 횟수 운영 트랜잭션 반영")
+    void 인증_코드_불일치_실패_횟수의_DB_반영() {
+        String email = randomEmail();
+
+        EmailVerification verification = emailVerificationRepository.saveAndFlush(
+                new EmailVerification(
+                        email,
+                        VerificationPurpose.SIGNUP,
+                        DUMMY_CODE_HASH,
+                        Instant.now().plusSeconds(300)
+                )
+        );
+
+        try {
+            // Service 트랜잭션의 예외 발생 이후에도 실패 횟수 저장 필요
+            assertThrows(
+                    VerificationCodeMismatchException.class,
+                    () -> emailVerificationService.confirmCode(
+                            email,
+                            VerificationPurpose.SIGNUP,
+                            "000000"
+                    )
+            );
+
+            // 별도 조회 트랜잭션을 통한 실제 DB 반영 결과 확인
+            EmailVerification saved = emailVerificationRepository
+                    .findById(verification.getId())
+                    .orElseThrow();
+            assertEquals(1, saved.getAttemptCount());
+        } finally {
+            // 클래스 수준 롤백이 적용되지 않는 테스트의 직접 데이터 정리
+            emailVerificationRepository.deleteById(verification.getId());
+        }
+    }
+
+    @Test
     @DisplayName("인증 시도 횟수 초과 시 거부")
-    void confirmCode_시도_횟수_초과_거부() {
+    void 인증_시도_횟수_초과_요청_거부() {
         String email = randomEmail();
 
         // 시도 횟수 체크가 해시 비교보다 먼저 일어나므로 DUMMY_CODE_HASH로 충분
@@ -271,7 +415,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("이미 사용된 인증 코드 재사용 거부")
-    void confirmCode_이미_사용됨_거부() {
+    void 사용한_인증_코드의_재사용_거부() {
         String email = randomEmail();
 
         // 이미 사용됨 체크가 해시 비교보다 먼저 일어나므로 DUMMY_CODE_HASH로 충분
@@ -298,7 +442,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("인증 미완료 이메일은 isVerified가 false")
-    void isVerified_미인증_false() {
+    void 인증하지_않은_이메일의_인증_완료_여부_false() {
         String email = randomEmail();
 
         // 발송 내역 자체가 없는 이메일은 인증 완료로 취급되면 안 됨

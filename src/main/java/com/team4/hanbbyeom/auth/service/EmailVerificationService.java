@@ -2,8 +2,10 @@ package com.team4.hanbbyeom.auth.service;
 
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
+import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.global.util.EmailNormalizer;
+import com.team4.hanbbyeom.user.repository.UserRepository;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage; // HTML, 이미지, 첨부파일, 인라인 이미지 등을 포함하는 복잡한 이메일 표현 가능
 import lombok.RequiredArgsConstructor;
@@ -46,10 +48,9 @@ public class EmailVerificationService {
 
     // Service 동작에 필요한 도구(의존성) 선언 필드
     private final EmailVerificationRepository emailVerificationRepository; // 이메일 인증 기록을 DB에 저장하고 조회하기 위해 사용
+    private final UserRepository userRepository; // 비밀번호 재설정 요청 이메일의 가입 여부 확인에 사용
     private final JavaMailSender mailSender; // (Spring 제공) 메일 발송 도구 인터페이스
-    // 만료·재전송 대기 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
-    // @RequiredArgsConstructor가 final 필드를 생성자 파라미터로 자동 추가한다
-    private final Clock clock;
+    private final Clock clock; // 만료·재전송 대기 판정은 TimeConfig의 Clock 빈만 사용
 
     // 인증 코드 해시(HMAC-SHA256)용 서버 전용 비밀키 (application.yaml → .env)
     // DB만 유출된 경우 이 키가 없으면 인증 코드를 역산할 수 없도록 함
@@ -62,7 +63,27 @@ public class EmailVerificationService {
     public void sendVerificationCode(String rawEmail, VerificationPurpose purpose) {
         String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
-        validateResendInterval(email, purpose);
+        // 목적이 PASSWORD_RESET인 경우 - 가입 여부 비노출 처리
+        if (purpose == VerificationPurpose.PASSWORD_RESET
+                && !userRepository.existsByEmailAndDeletedAtIsNull(email)) {
+            // 기존에는 '가입 이메일: 기존 기록 때문에 400 응답', '미가입 이메일: 기록이 없어서 계속 200 응답'
+            // → 이 차이로 가입 여부 추측 가능, 차이가 드러나지 않도록 수정
+            // → 미가입 이메일이어도 예외를 발생시키지 않고 return으로 정상 종료 (인증 기록과 메일은 생성X)
+            return;
+        }
+
+        boolean resendAllowed = isResendAllowed(email, purpose);
+
+        // 목적이 PASSWORD_RESET인 경우 - 재발송 제한 여부 비노출 처리
+        // 60초 재발송 제한 중인 요청도 위와 같이 정상 종료, 추가 발송만 생략
+        if (!resendAllowed && purpose == VerificationPurpose.PASSWORD_RESET) {
+            return;
+        }
+
+        // 재발송 제한 응답: 기존 SIGNUP 목적과 동일한 문구 사용
+        if (!resendAllowed) {
+            throw new IllegalStateException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
+        }
 
         String code = generateCode(); // 인증번호 생성
         String codeHash = hash(code); // 인증번호 해시 (DB에는 해시값 저장)
@@ -84,8 +105,11 @@ public class EmailVerificationService {
 
     // @Transactional: 조회한 verification의 필드 변경(increaseAttemptCount, markVerified)이
     // 트랜잭션 커밋 시점에 JPA dirty checking으로 자동 반영됨 (별도 save() 호출 불필요)
+
     // 이메일 인증 코드 확인: 사용 여부·만료·시도 횟수 검증 후 코드 일치 여부 확인
-    @Transactional
+    // noRollbackFor = VerificationCodeMismatchException.class:
+    // 인증 코드 불일치 예외는 실패 횟수 저장 후 발생하므로 해당 변경만 롤백에서 제외, 증가한 실패 횟수 DB 저장
+    @Transactional(noRollbackFor = VerificationCodeMismatchException.class)
     public void confirmCode(String rawEmail, VerificationPurpose purpose, String rawCode) {
         String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
@@ -117,7 +141,7 @@ public class EmailVerificationService {
         if (!matchesHash(rawCode, verification.getCodeHash())) {
             // 불일치 시 실패 횟수 증가
             verification.increaseAttemptCount();
-            throw new IllegalStateException("인증 코드가 일치하지 않습니다.");
+            throw new VerificationCodeMismatchException("인증 코드가 일치하지 않습니다.");
         }
 
         // 일치하면 인증 완료 처리
@@ -127,7 +151,7 @@ public class EmailVerificationService {
     // 조회만 하고 값을 변경하지 않으므로 readOnly = true (성능 최적화, 실수로 값 변경 시 예외 발생)
     @Transactional(readOnly = true)
     // 이 이메일이 전달받은 목적에 대해 가장 최근 인증 요청 기준으로 인증 완료됐는지 확인하는 메서드
-    // #2 회원가입 Service가 가입 완료 처리 전에 호출해서 사용
+    // 회원가입 Service가 가입 완료 처리 전에 호출해서 사용
     public boolean isVerified(String rawEmail, VerificationPurpose purpose) {
         String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
 
@@ -143,7 +167,7 @@ public class EmailVerificationService {
     }
 
     // 이 이메일이 해당 목적으로 실제 인증에 성공한 시각을 반환하는 메서드
-    // #2 회원가입 Service가 User.emailVerifiedAt에 정확한 인증 시각을 기록하기 위해 사용
+    // 회원가입 Service가 User.emailVerifiedAt에 정확한 인증 시각을 기록하기 위해 사용
     @Transactional(readOnly = true)
     public Instant getVerifiedAt(String rawEmail, VerificationPurpose purpose) {
         String email = EmailNormalizer.normalize(rawEmail); // 이메일 정규화(공백 제거 후 소문자로)
@@ -163,21 +187,17 @@ public class EmailVerificationService {
                 .orElseThrow(() -> new IllegalStateException("이메일 인증을 먼저 완료해주세요."));
     }
 
-    // 60초 재발송 제한을 검사하는 메서드
-    // 동일 이메일+목적의 마지막 발송 시각과 비교해 최소 대기시간 이내 재전송 차단
-    private void validateResendInterval(String email, VerificationPurpose purpose) {
-        emailVerificationRepository.findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
-                .ifPresent(latest -> {
-
-                    // 최근 인증번호의 발송시간에 RESEND_INTERVAL(60초)를 더해서 재발송 가능 시간 설정
+    // 같은 이메일로 같은 목적의 인증 코드를 다시 보낼 수 있는지 (최근 발송 시각 기준 재발송 가능 여부) 확인
+    private boolean isResendAllowed(String email, VerificationPurpose purpose) {
+        return emailVerificationRepository
+                .findTopByEmailAndPurposeOrderByCreatedAtDesc(email, purpose)
+                // 최근 발송 기록이 있으면 60초 경과 여부 확인
+                .map(latest -> {
                     Instant nextAllowedAt = latest.getCreatedAt().plus(RESEND_INTERVAL);
-
-                    // 현재 시간이 다음 허용 시간보다 이전인지 확인
-                    if (Instant.now(clock).isBefore(nextAllowedAt)) {
-                        // 아직 60초가 지나지 않았으면 예외 던져서 메서드 실행 중단
-                        throw new IllegalStateException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
-                    }
-                });
+                    return !Instant.now(clock).isBefore(nextAllowedAt);
+                })
+                // 발송 기록이 없으면 즉시 발송 허용
+                .orElse(true);
     }
 
     // SecureRandom으로 예측 불가능한 6자리 인증 코드 생성
