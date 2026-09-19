@@ -329,6 +329,14 @@ class UserWithdrawIntegrationTest {
         entityManager.clear();
     }
 
+    // 완료한 활동 수(trust_profile). 행이 없으면 null — 집계되지 않았다는 뜻
+    private Integer completedCount(Long userId) {
+        entityManager.flush();
+        var rows = jdbcTemplate.queryForList(
+                "SELECT completed_activity_count FROM trust_profile WHERE user_id = ?", Integer.class, userId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     private MatchRequestStatus postStatus(Long requestId) {
         return matchRequestRepository.findById(requestId).orElseThrow().getStatus();
     }
@@ -497,6 +505,9 @@ class UserWithdrawIntegrationTest {
                 .allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
         // 정상 종료된 활동이라 지난 일정의 게시글이 다시 모집 중이 되면 안 된다
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
+        // 스케줄러가 종료했을 때와 똑같이 두 참가자의 완료한 활동 수가 집계된다(탈퇴한 사용자의 행 포함)
+        assertThat(completedCount(host.getId())).isEqualTo(1);
+        assertThat(completedCount(applicant.getId())).isEqualTo(1);
     }
 
     // 활동이 이미 시작된 게시글을 SEARCHING으로 되돌리면 모집 탭에는 보이지만 apply()의 응답 기한 계산
@@ -519,6 +530,9 @@ class UserWithdrawIntegrationTest {
         assertThat(matchParticipantRepository.findByActivityMatchId(matchId))
                 .allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
+        // 취소된 매칭은 완료한 활동이 아니다
+        assertThat(completedCount(host.getId())).isNull();
+        assertThat(completedCount(applicant.getId())).isNull();
     }
 
     @Test
@@ -536,6 +550,8 @@ class UserWithdrawIntegrationTest {
         assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
                 .isEqualTo(ActivityMatchStatus.CANCELLED);
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
+        assertThat(completedCount(host.getId())).isNull();
+        assertThat(completedCount(applicant.getId())).isNull();
     }
 
     // PROPOSED도 같은 규칙이다. 스케줄러가 멈춰 응답 기한이 지난 채 활동 시각까지 지나간 신청 대기 매칭이
@@ -554,6 +570,8 @@ class UserWithdrawIntegrationTest {
         assertThat(activityMatchRepository.findById(matchId).orElseThrow().getStatus())
                 .isEqualTo(ActivityMatchStatus.EXPIRED);
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.CLOSED);
+        assertThat(completedCount(host.getId())).isNull();
+        assertThat(completedCount(applicant.getId())).isNull();
     }
 
     // ---- 탈퇴 비밀번호 72바이트 상한(로그인·회원가입과 동일) ---------------------------------------

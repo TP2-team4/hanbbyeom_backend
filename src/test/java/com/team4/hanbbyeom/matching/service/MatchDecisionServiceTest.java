@@ -288,12 +288,124 @@ class MatchDecisionServiceTest {
         var normalParticipants = matchParticipantRepository.findByActivityMatchId(activityMatch2Id);
         assertThat(normalParticipants).allSatisfy(p -> assertThat(p.getReleasedAt()).isNotNull());
 
+        // 완료한 활동 수도 정상 처리된 건의 두 참가자만 올라가고, 스킵된 비정상 건의 신청자는 올라가지 않는다.
+        Long applicant2UserId = jdbcTemplate.queryForObject(
+                "SELECT user_id FROM match_participant WHERE activity_match_id = ? AND slot = 'B'",
+                Long.class, activityMatch2Id);
+        assertThat(completedCount(host2UserId)).isEqualTo(1);
+        assertThat(completedCount(applicant2UserId)).isEqualTo(1);
+        assertThat(completedCount(applicantUserId)).isNull();
+
         // 정상 처리된 건의 호스트 게시글도 CLOSED로 전이돼야 한다(비정상 건 스킵과 무관하게).
         Long host2RequestId = jdbcTemplate.queryForObject(
                 "SELECT match_request_id FROM match_participant WHERE activity_match_id = ? AND slot = 'A'",
                 Long.class, activityMatch2Id);
         assertThat(matchRequestRepository.findById(host2RequestId).orElseThrow().getStatus())
                 .isEqualTo(MatchRequestStatus.CLOSED);
+    }
+
+    // ---- 완료한 활동 수 집계 (이슈 #96) ----------------------------------------------------------------
+    // 완료한 활동은 activity_match가 ENDED로 전환될 때 두 참가자 모두 +1이다(후기·노쇼 신고 여부와 무관).
+
+    // trust_profile 행이 없으면 null
+    private Integer completedCount(Long userId) {
+        var rows = jdbcTemplate.queryForList(
+                "SELECT completed_activity_count FROM trust_profile WHERE user_id = ?", Integer.class, userId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    // 수락(CONFIRMED)한 뒤 종료 시각을 과거로 밀어 스케줄러가 종료할 상태로 만든다
+    private void confirmAndMakeOverdue() {
+        matchDecisionService.accept(hostUserId, activityMatchId);
+        entityManager.flush();
+        pushScheduledEndAtIntoThePast(activityMatchId);
+        entityManager.clear();
+    }
+
+    @Test
+    void 종료되면_두_참가자의_완료한_활동_수가_1_증가하고_행이_없던_사용자는_행이_생긴다() {
+        assertThat(completedCount(hostUserId)).isNull();
+        assertThat(completedCount(applicantUserId)).isNull();
+        confirmAndMakeOverdue();
+
+        matchDecisionService.endOverdueActivities();
+
+        assertThat(completedCount(hostUserId)).isEqualTo(1);
+        assertThat(completedCount(applicantUserId)).isEqualTo(1);
+        // 후기가 없는 새 행의 평균 별점은 0.0이 아니라 NULL이다(V16)
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT average_rating FROM trust_profile WHERE user_id = ?", java.math.BigDecimal.class, hostUserId))
+                .isNull();
+    }
+
+    @Test
+    void 이미_신뢰_프로필이_있으면_완료한_활동_수만_올리고_다른_값은_유지한다() {
+        jdbcTemplate.update(
+                """
+                INSERT INTO trust_profile
+                    (user_id, average_rating, review_count, no_show_report_count,
+                     review_silent_vote_count, completed_activity_count)
+                VALUES (?, 4.5, 2, 1, 2, 5)
+                """,
+                hostUserId);
+        confirmAndMakeOverdue();
+
+        matchDecisionService.endOverdueActivities();
+
+        var row = jdbcTemplate.queryForMap(
+                "SELECT average_rating, review_count, no_show_report_count, review_silent_vote_count, "
+                        + "completed_activity_count FROM trust_profile WHERE user_id = ?", hostUserId);
+        assertThat(row.get("completed_activity_count")).isEqualTo(6);
+        assertThat(((Number) row.get("average_rating")).doubleValue()).isEqualTo(4.5);
+        assertThat(row.get("review_count")).isEqualTo(2);
+        assertThat(row.get("no_show_report_count")).isEqualTo(1);
+        assertThat(row.get("review_silent_vote_count")).isEqualTo(2);
+    }
+
+    // 스케줄러가 1분마다 돌아도 같은 활동을 다시 세면 안 된다 — 상태 전이(CONFIRMED→ENDED) 자체가 중복 증가를 막는다.
+    @Test
+    void 스케줄러가_반복_실행돼도_완료한_활동_수는_한_번만_증가한다() {
+        confirmAndMakeOverdue();
+
+        matchDecisionService.endOverdueActivities();
+        matchDecisionService.endOverdueActivities();
+        matchDecisionService.endOverdueActivities();
+
+        assertThat(completedCount(hostUserId)).isEqualTo(1);
+        assertThat(completedCount(applicantUserId)).isEqualTo(1);
+    }
+
+    @Test
+    void 종료_시각이_지나지_않았거나_확정되지_않은_매칭은_집계하지_않는다() {
+        // 확정됐지만 종료 시각 전
+        matchDecisionService.accept(hostUserId, activityMatchId);
+        matchDecisionService.endOverdueActivities();
+
+        assertThat(completedCount(hostUserId)).isNull();
+        assertThat(completedCount(applicantUserId)).isNull();
+    }
+
+    @Test
+    void 거절된_매칭은_집계하지_않는다() {
+        matchDecisionService.reject(hostUserId, activityMatchId);
+        matchDecisionService.endOverdueActivities();
+
+        assertThat(completedCount(hostUserId)).isNull();
+        assertThat(completedCount(applicantUserId)).isNull();
+    }
+
+    @Test
+    void 응답_기한이_지나_만료된_매칭은_집계하지_않는다() {
+        makeDeadlineOverdue(activityMatchId);
+        entityManager.clear();
+
+        matchDecisionService.expireOverdue();
+        matchDecisionService.endOverdueActivities();
+
+        assertThat(activityMatchRepository.findById(activityMatchId).orElseThrow().getStatus())
+                .isEqualTo(ActivityMatchStatus.EXPIRED);
+        assertThat(completedCount(hostUserId)).isNull();
+        assertThat(completedCount(applicantUserId)).isNull();
     }
 
     // 두 스케줄러 회귀 테스트가 공통으로 쓰는, @BeforeEach와 별개인 두 번째 PROPOSED 매칭 생성.
