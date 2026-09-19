@@ -6,6 +6,7 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
+import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
@@ -185,5 +186,21 @@ public class MatchRequestBoardService {
         }
 
         return new PendingApplicationResponse(activityMatchId, activityMatch.getDecisionExpiresAt());
+    }
+
+    // 내가 등록한 모집글 전체 목록 조회(GET /api/matching/requests) — 상태 필터링/재매핑은
+    // 프론트가 담당하므로, 여기서는 최신순 전체 목록을 그대로 반환한다.
+    public List<MyPostResponse> getMyPosts(Long userId) {
+        return matchRequestRepository.findMyPosts(userId).stream()
+                .map(row -> new MyPostResponse(
+                        row.getId(),
+                        row.getCourseName(),
+                        row.getDistanceMinMeters(),
+                        row.getDistanceMaxMeters(),
+                        row.getScheduledAt().atOffset(ZoneOffset.UTC),
+                        row.getTalkLevel(),
+                        row.getStatus()
+                ))
+                .toList();
     }
 }

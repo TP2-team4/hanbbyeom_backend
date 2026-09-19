@@ -8,6 +8,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -112,8 +113,22 @@ class SwaggerSecuritySchemeTest {
                         "$.components.schemas.SignUpRequest.properties.password.description").exists())
                 .andExpect(jsonPath(
                         "$.components.schemas.SignUpRequest.properties.password.format").value("password"))
+                // 회원가입은 글자 수 정책과 BCrypt 바이트 상한을 모두 문서에서 확인 가능해야 함
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpRequest.properties.password.minLength").value(8))
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpRequest.properties.password.maxLength").value(64))
+                .andExpect(jsonPath(
+                        "$.components.schemas.SignUpRequest.properties.password.description")
+                        .value(containsString("UTF-8 기준 72바이트 이하")))
                 .andExpect(jsonPath(
                         "$.components.schemas.LoginRequest.properties.password.format").value("password"))
+                // 로그인에는 회원가입의 최소 8자 조건을 다시 요구하지 않고 빈 값만 차단
+                .andExpect(jsonPath(
+                        "$.components.schemas.LoginRequest.properties.password.minLength").value(1))
+                .andExpect(jsonPath(
+                        "$.components.schemas.LoginRequest.properties.password.description")
+                        .value(containsString("UTF-8 기준 72바이트 이하")))
 
                 // 프론트엔드가 회원가입 요청에 보낼 필드의 의미와 허용값을 문서만 보고 알 수 있는지 확인
                 // enum 값을 정확히 검증해 서버와 다른 문자열을 선택지로 사용하는 것을 방지

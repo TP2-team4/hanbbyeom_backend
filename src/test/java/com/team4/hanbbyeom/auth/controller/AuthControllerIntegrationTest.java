@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +47,13 @@ class AuthControllerIntegrationTest {
     // API 호출 후 실제 사용자 설정이 DB에 저장됐는지 별도로 확인
     @Autowired
     private UserRepository userRepository;
+
+    // 기존 계정 호환성 검증을 위한 비밀번호 해시 생성
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    private static final String PASSWORD_BYTE_ERROR =
+            "비밀번호가 허용 길이를 초과했습니다. 더 짧게 작성해주세요.";
 
     // 테스트 간 이메일 UNIQUE 제약 충돌을 방지하기 위해 매번 다른 주소 생성
     private String randomEmail() {
@@ -135,5 +143,120 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.message").value("요청 형식이 올바르지 않습니다."));
+    }
+
+    @Test
+    @DisplayName("UTF-8 기준 72바이트 비밀번호로 회원가입 성공")
+    void signUp_72바이트_비밀번호_허용() throws Exception {
+        String email = randomEmail();
+        String password = "가".repeat(24); // 한글 24자 = UTF-8 기준 72바이트
+        completeEmailVerification(email);
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s",
+                                  "nickname": "테스트",
+                                  "defaultTalkLevel": "SILENT"
+                                }
+                                """.formatted(email, password)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(email));
+    }
+
+    @Test
+    @DisplayName("UTF-8 기준 72바이트를 초과한 회원가입 비밀번호는 400")
+    void signUp_72바이트_초과_비밀번호_거부() throws Exception {
+        // 한글 25자는 글자 수 정책(8~64자)은 만족하지만 UTF-8 기준으로는 75바이트
+        String password = "가".repeat(25);
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "runner@example.com",
+                                  "password": "%s",
+                                  "nickname": "테스트",
+                                  "defaultTalkLevel": "SILENT"
+                                }
+                                """.formatted(password)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value(PASSWORD_BYTE_ERROR));
+    }
+
+    @Test
+    @DisplayName("72바이트 비밀번호 로그인 성공 및 문자 추가 시 400")
+    void login_72바이트_비밀번호_경계_검증() throws Exception {
+        String email = randomEmail();
+        // 영문 60자와 한글 4자로 총 64자·72바이트 구성
+        String password = "a".repeat(60) + "가".repeat(4);
+        completeEmailVerification(email);
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s",
+                                  "nickname": "테스트",
+                                  "defaultTalkLevel": "SILENT"
+                                }
+                                """.formatted(email, password)))
+                .andExpect(status().isOk());
+
+        // 정확히 72바이트인 원래 비밀번호의 정상 인증
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s"
+                                }
+                                """.formatted(email, password)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty());
+
+        // 같은 비밀번호 뒤에 한 글자를 붙인 73바이트 입력의 인증 처리 이전 차단
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s"
+                                }
+                                """.formatted(email, password + "a")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value(PASSWORD_BYTE_ERROR));
+    }
+
+    @Test
+    @DisplayName("기존 계정의 8자 미만 비밀번호도 로그인 허용")
+    void login_기존_짧은_비밀번호_허용() throws Exception {
+        String email = randomEmail();
+        String password = "old1234"; // 과거 정책에서 생성됐다고 가정한 7자 비밀번호
+
+        userRepository.save(new User(
+                email,
+                passwordEncoder.encode(password),
+                "기존사용자",
+                DefaultTalkLevel.SILENT,
+                Instant.now()
+        ));
+
+        // 로그인에는 회원가입의 최소 8자 조건을 다시 적용하지 않음
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "%s"
+                                }
+                                """.formatted(email, password)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty());
     }
 }
