@@ -23,6 +23,10 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     // 닉네임·신뢰도(users, trust_profile)까지 한 번에 조인해서 화면에 필요한 걸 통째로 가져온다
     // — N+1 없이 목록 화면 하나를 한 번의 쿼리로 채우려는 목적. trust_profile은 아직 활동 이력이
     // 없는 신규 유저면 행 자체가 없을 수 있어 LEFT JOIN(없으면 rating/count는 null로 나옴).
+    // 최근 후기 1건은 LEFT JOIN LATERAL로 가져온다 — 작성자(reviewee_user_id)가 받은 후기 중
+    // created_at DESC, id DESC(동시각 타이브레이커)로 첫 행. V15 복합 인덱스
+    // (reviewee_user_id, created_at DESC, id DESC)가 이 정렬 순서와 정확히 일치해서 정렬 없이
+    // 인덱스 첫 행만 읽고 끝난다. 후기가 없으면 두 컬럼 모두 NULL (이슈 #70).
     // 탈퇴한 작성자(users.deleted_at IS NOT NULL)의 글은 제외한다 — 탈퇴 시 닉네임이 NULL로 지워져도
     // SEARCHING 상태의 모집글은 그대로 남기 때문에, 이 조건이 없으면 닉네임 없는 글이 목록에 노출된다.
     // WHERE절의 파라미터들은 전부 "값이 없으면(:xxx IS NULL) 그 조건은 무시"하는 선택적 필터이고,
@@ -40,12 +44,22 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
            mr.user_id AS userId,
            u.nickname AS authorNickname,
            tp.average_rating AS authorRating,
-           tp.completed_activity_count AS authorCompletedCount
+           tp.completed_activity_count AS authorCompletedCount,
+           tp.no_show_report_count AS authorNoShowCount,
+           latest_review.comment AS latestReviewComment,
+           latest_review.created_at AS latestReviewCreatedAt
     FROM match_request mr
     JOIN run_match_condition rc ON rc.match_request_id = mr.id
     JOIN running_course co ON co.id = rc.course_id
     JOIN users u ON u.id = mr.user_id
     LEFT JOIN trust_profile tp ON tp.user_id = mr.user_id
+    LEFT JOIN LATERAL (
+        SELECT ar.comment, ar.created_at
+        FROM activity_review ar
+        WHERE ar.reviewee_user_id = mr.user_id
+        ORDER BY ar.created_at DESC, ar.id DESC
+        LIMIT 1
+    ) latest_review ON true
     WHERE mr.status = 'SEARCHING'
       AND mr.activity_type = 'RUN'
       AND u.deleted_at IS NULL
@@ -85,13 +99,18 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getAuthorNickname();
         Double getAuthorRating();
         Integer getAuthorCompletedCount();
+        Integer getAuthorNoShowCount();
+        String getLatestReviewComment();
+        Instant getLatestReviewCreatedAt();
     }
 
     // 모집글 상세(GET /api/matching/requests/{id})용 조회. 목록(searchBoard)과 달리
     // status·meetingPoint까지 포함하고, status 필터 없이 어떤 상태의 글이든 조회 가능
     // (작성자 본인이 취소/완료된 자기 글을 다시 열어볼 수도 있어야 하므로).
     // 작성자 닉네임은 여기서 조인하지 않는다 — Service(MatchRequestBoardService)가 별도로
-    // fetchNicknames()를 호출해서 채운다(도메인 간 결합도를 낮추려는 의도).
+    // fetchNicknames()를 호출해서 채운다(도메인 간 결합도를 낮추려는 의도). 다만 평점/완료횟수/
+    // 노쇼횟수/최근후기는 searchBoard와 똑같이 여기서 조인해서 내려준다 — 이전엔 이 값들을
+    // 아예 안 가져와서 Service가 null로 하드코딩했었다 (이슈 #70 버그 수정).
     @Query(value = """
         SELECT
             mr.id AS id,
@@ -104,10 +123,23 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
             mr.scheduled_at AS scheduledAt,
             mr.talk_level AS talkLevel,
             mr.status AS status,
-            mr.user_id AS userId
+            mr.user_id AS userId,
+            tp.average_rating AS authorRating,
+            tp.completed_activity_count AS authorCompletedCount,
+            tp.no_show_report_count AS authorNoShowCount,
+            latest_review.comment AS latestReviewComment,
+            latest_review.created_at AS latestReviewCreatedAt
         FROM match_request mr
         JOIN run_match_condition rc ON rc.match_request_id = mr.id
         JOIN running_course co ON co.id = rc.course_id
+        LEFT JOIN trust_profile tp ON tp.user_id = mr.user_id
+        LEFT JOIN LATERAL (
+            SELECT ar.comment, ar.created_at
+            FROM activity_review ar
+            WHERE ar.reviewee_user_id = mr.user_id
+            ORDER BY ar.created_at DESC, ar.id DESC
+            LIMIT 1
+        ) latest_review ON true
         WHERE mr.id = :id
         """, nativeQuery = true)
     java.util.Optional<MatchRequestDetailRow> findDetailById(@Param("id") Long id);
@@ -138,6 +170,11 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         String getTalkLevel();
         String getStatus();
         Long getUserId();
+        Double getAuthorRating();
+        Integer getAuthorCompletedCount();
+        Integer getAuthorNoShowCount();
+        String getLatestReviewComment();
+        Instant getLatestReviewCreatedAt();
     }
 
     // GET /api/matching/requests (내 모집글 전체 목록)용 조회. findDetailById()와 조인 구조는

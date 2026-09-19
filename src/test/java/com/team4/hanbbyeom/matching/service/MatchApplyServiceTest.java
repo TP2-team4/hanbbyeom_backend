@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.*;
+import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
@@ -333,6 +334,63 @@ class MatchApplyServiceTest {
                 .containsExactly(tuple(acceptedId, "ACCEPTED"));
         assertThat(matchApplyService.getMyApplications(acceptedApplicantUserId, "ACCEPTED"))
                 .extracting(MyApplicationResponse::activityMatchId).containsExactly(acceptedId);
+    }
+
+    // 이슈 #70: 내 신청 내역의 호스트 카드도 모집 탭 목록/상세와 같은 AuthorSummary를 쓰므로, 노쇼 횟수와
+    // 최근 후기가 같은 방식으로 채워져야 한다. 세 화면 중 이 경로만 검증이 빠져 있어 추가.
+    @Test
+    void 내_신청_내역의_호스트_카드에_노쇼_횟수와_최근_후기가_채워진다() {
+        jdbcTemplate.update(
+                "INSERT INTO trust_profile (user_id, average_rating, no_show_report_count) VALUES (?, ?, ?)",
+                hostUserId, 4.0, 2
+        );
+        giveReviewToHost("페이스 잘 맞춰주셨어요");
+
+        matchApplyService.apply(applicantUserId, hostRequestId);
+
+        MatchBoardItemResponse.AuthorSummary host =
+                matchApplyService.getMyApplications(applicantUserId, null).get(0).host();
+        assertThat(host.rating()).isEqualTo(4.0);
+        assertThat(host.noShowCount()).isEqualTo(2);
+        assertThat(host.latestReview()).isNotNull();
+        assertThat(host.latestReview().comment()).isEqualTo("페이스 잘 맞춰주셨어요");
+        assertThat(host.latestReview().createdAt()).isNotNull();
+    }
+
+    // 호스트가 "과거에 후기를 받은" 상태를 만든다 — 새 리뷰어와 이미 끝난 매칭을 하나 만들고 리뷰어가 호스트에게
+    // 후기를 남긴 것으로 activity_review를 직접 INSERT한다(복합 FK 때문에 두 사람 모두 그 매칭의 참가자여야 함).
+    // 참가 행은 만들자마자 release()한다 — 이 테스트가 이어서 apply()로 호스트에게 새 활성 참가 행을 만들기
+    // 때문에, 과거 매칭의 참가 행이 활성으로 남아 있으면 uq_participant_active_user에 걸린다. 그리고 그 해제가
+    // 다음 INSERT보다 먼저 DB에 반영되도록 saveAndFlush()를 쓴다(같은 플러시 안에서는 INSERT가 UPDATE보다 앞선다).
+    // match_request_id는 V11부터 nullable이라 별도 게시글 없이 null로 둔다.
+    private void giveReviewToHost(String comment) {
+        Long reviewerId = createUser("reviewer");
+
+        OffsetDateTime base = OffsetDateTime.now().minusHours(2);
+        ActivityMatch pastMatch = new ActivityMatch(
+                base.plusMinutes(20), base.plusMinutes(30), TalkLevel.SILENT,
+                "뚝섬 한강공원", "뚝섬 한강공원 코스", 5000, 12000,
+                "뚝섬유원지역 3번 출구", 360, 400,
+                base.plusMinutes(10), base
+        );
+        pastMatch.confirm("123456");
+        pastMatch.end();
+        Long pastMatchId = activityMatchRepository.save(pastMatch).getId();
+
+        MatchParticipant hostSide = matchParticipantRepository.save(
+                new MatchParticipant(pastMatchId, null, hostUserId, "A", AcceptStatus.ACCEPTED));
+        MatchParticipant reviewerSide = matchParticipantRepository.save(
+                new MatchParticipant(pastMatchId, null, reviewerId, "B", AcceptStatus.ACCEPTED));
+        hostSide.release();
+        reviewerSide.release();
+        matchParticipantRepository.saveAndFlush(hostSide);
+        matchParticipantRepository.saveAndFlush(reviewerSide);
+
+        jdbcTemplate.update("""
+                INSERT INTO activity_review
+                    (activity_match_id, reviewer_user_id, reviewee_user_id, rating, perceived_talk_level, comment)
+                VALUES (?, ?, ?, 5, 'SILENT', ?)
+                """, pastMatchId, reviewerId, hostUserId, comment);
     }
 
     // EXPIRED(호스트가 응답 기한을 넘겨 시스템이 자동 만료시킨 경우)도 신청자 입장에서는

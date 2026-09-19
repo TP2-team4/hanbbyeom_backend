@@ -74,7 +74,10 @@ public class MatchRequestBoardService {
                         new MatchBoardItemResponse.AuthorSummary(
                                 row.getAuthorNickname(),
                                 row.getAuthorRating(),
-                                row.getAuthorCompletedCount()
+                                row.getAuthorCompletedCount(),
+                                row.getAuthorNoShowCount(),
+                                MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                        row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
                         )
                 ))
                 .collect(Collectors.toList());
@@ -148,7 +151,16 @@ public class MatchRequestBoardService {
                 row.getStatus(),
                 row.getUserId().equals(currentUserId),
                 pendingApplicantCount,
-                new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
+                // 목록(getBoard)과 같은 값을 내려준다 — 이전엔 (nickname, null, null)로 하드코딩돼 있어
+                // 상세 화면에서만 평점/완료횟수가 항상 비어 보이던 버그 (이슈 #70)
+                new MatchBoardItemResponse.AuthorSummary(
+                        nickname,
+                        row.getAuthorRating(),
+                        row.getAuthorCompletedCount(),
+                        row.getAuthorNoShowCount(),
+                        MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                )
         );
     }
 
