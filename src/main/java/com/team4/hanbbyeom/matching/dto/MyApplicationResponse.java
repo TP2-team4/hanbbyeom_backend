@@ -1,5 +1,7 @@
 package com.team4.hanbbyeom.matching.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.time.OffsetDateTime;
 
 // 신청자 본인이 지금까지 넣은 신청 내역 목록(GET /api/matching/board/applications) 한 건.
@@ -24,5 +26,6 @@ public record MyApplicationResponse(
         Integer distanceMaxMeters,
         OffsetDateTime scheduledAt,
         String talkLevel,
+        @Schema(description = "호스트 정보. 내 신청 이력이므로 호스트가 탈퇴해도 항목은 유지되며, 이때 host.nickname은 null")
         MatchBoardItemResponse.AuthorSummary host
 ) {}
