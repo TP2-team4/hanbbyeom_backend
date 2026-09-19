@@ -515,4 +515,35 @@ class UserWithdrawIntegrationTest {
                 .isEqualTo(ActivityMatchStatus.CANCELLED);
         assertThat(postStatus(hostPost.getId())).isEqualTo(MatchRequestStatus.SEARCHING);
     }
+
+    // ---- 탈퇴 비밀번호 72바이트 상한(로그인·회원가입과 동일) ---------------------------------------
+    // BCrypt가 처리하는 72바이트를 넘는 입력은 비교 전에 400으로 차단한다. 검증이 서비스보다 먼저 동작하므로
+    // 403(비밀번호 불일치)이 아니라 400이 나오고 계정은 변경되지 않는다.
+    @Test
+    @DisplayName("비밀번호가 UTF-8 72바이트를 넘으면 비밀번호 비교 전에 400으로 거부한다")
+    void 비밀번호가_72바이트를_넘으면_400을_반환한다() throws Exception {
+        User user = createUser("bytes-" + UUID.randomUUID() + "@example.com");
+        String token = bearerToken(user.getId());
+
+        // ASCII 73자 = 73바이트
+        withdraw(token, "a".repeat(73))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("비밀번호가 허용 길이를 초과했습니다. 더 짧게 작성해주세요."));
+        // 한글 25자 = 75바이트 — 글자 수가 아니라 바이트 기준이다
+        withdraw(token, "가".repeat(25)).andExpect(status().isBadRequest());
+
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("비밀번호가 정확히 72바이트면 검증을 통과해 비밀번호 비교까지 진행된다")
+    void 비밀번호가_정확히_72바이트면_검증을_통과한다() throws Exception {
+        User user = createUser("bytes72-" + UUID.randomUUID() + "@example.com");
+
+        // 검증은 통과하지만 본인 비밀번호가 아니므로 400이 아니라 403(불일치)이 나온다
+        withdraw(bearerToken(user.getId()), "a".repeat(72)).andExpect(status().isForbidden());
+        withdraw(bearerToken(user.getId()), "가".repeat(24)).andExpect(status().isForbidden()); // 24자 = 72바이트
+    }
 }
