@@ -136,7 +136,9 @@ public class ActivityFeedbackApiIntegrationTest {
                         "FROM trust_profile WHERE user_id = ?", userBId);
         assertThat(((Number) profile.get("average_rating")).doubleValue()).isEqualTo(5.0);
         assertThat(profile.get("review_count")).isEqualTo(1);
-        assertThat(profile.get("completed_activity_count")).isEqualTo(1);
+        // completed_activity_count는 정의가 확정되기 전까지 의도적으로 건드리지 않는다
+        // (PR #83 리뷰 — "정의를 미루는 것과 값을 쌓는 것은 분리해야 한다")
+        assertThat(profile.get("completed_activity_count")).isEqualTo(0);
         assertThat(profile.get("review_light_chat_vote_count")).isEqualTo(1);
 
         mockMvc.perform(get("/api/matching/matches/{id}/feedback-status", endedActivityMatchId)
@@ -215,10 +217,11 @@ public class ActivityFeedbackApiIntegrationTest {
     @Test
     void 이미_후기가_있는_사용자가_후기를_더_받으면_평균이_누적_갱신된다() throws Exception {
         // userB가 이전에 SILENT 4점 후기를 하나 받아본 상태를 직접 세팅
+        // (completed_activity_count는 이제 이 서비스가 건드리지 않는 컬럼이라 세팅에서 뺐다)
         jdbcTemplate.update("""
                 INSERT INTO trust_profile
-                    (user_id, average_rating, review_count, completed_activity_count, review_silent_vote_count)
-                VALUES (?, 4.0, 1, 1, 1)
+                    (user_id, average_rating, review_count, review_silent_vote_count)
+                VALUES (?, 4.0, 1, 1)
                 """, userBId);
 
         ReviewCreateRequest request = new ReviewCreateRequest(5, TalkLevel.SILENT, null);
@@ -229,11 +232,34 @@ public class ActivityFeedbackApiIntegrationTest {
                 .andExpect(status().isNoContent());
 
         var profile = jdbcTemplate.queryForMap(
-                "SELECT average_rating, review_count, completed_activity_count, review_silent_vote_count " +
+                "SELECT average_rating, review_count, review_silent_vote_count " +
                         "FROM trust_profile WHERE user_id = ?", userBId);
         assertThat(((Number) profile.get("average_rating")).doubleValue()).isEqualTo(4.5);
         assertThat(profile.get("review_count")).isEqualTo(2);
-        assertThat(profile.get("completed_activity_count")).isEqualTo(2);
         assertThat(profile.get("review_silent_vote_count")).isEqualTo(2);
+    }
+
+    // 7. upsert의 DO UPDATE SET 절에 updated_at이 빠져 있으면, 이미 있는 행에 두 번째
+    //    후기/신고가 반영돼도 updated_at이 최초 생성 시각에 그대로 고정된다 (PR #83 리뷰로 발견).
+    //    행 생성 시각을 일부러 과거로 세팅해두고, 후기 반영 후 갱신됐는지로 검증한다.
+    @Test
+    void 후기가_반영되면_updated_at도_갱신된다() throws Exception {
+        OffsetDateTime staleUpdatedAt = OffsetDateTime.now().minusDays(1);
+        jdbcTemplate.update("""
+                INSERT INTO trust_profile
+                    (user_id, average_rating, review_count, review_silent_vote_count, updated_at)
+                VALUES (?, 4.0, 1, 1, ?)
+                """, userBId, staleUpdatedAt);
+
+        ReviewCreateRequest request = new ReviewCreateRequest(5, TalkLevel.SILENT, null);
+        mockMvc.perform(post("/api/matching/matches/{id}/review", endedActivityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(userAId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        OffsetDateTime updatedAt = jdbcTemplate.queryForObject(
+                "SELECT updated_at FROM trust_profile WHERE user_id = ?", OffsetDateTime.class, userBId);
+        assertThat(updatedAt).isAfter(staleUpdatedAt);
     }
 }

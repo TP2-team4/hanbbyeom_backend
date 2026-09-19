@@ -63,6 +63,11 @@ public class ActivityFeedbackService {
         // 두 번 요청을 보내면(더블클릭 등) 둘 다 이 체크를 통과할 수 있다 — 그다음은
         // uq_activity_review_once UNIQUE 제약이 최종 방어선이고, 그 위반을 아래 catch에서
         // FeedbackAlreadySubmittedException(409)으로 바꿔준다(안 그러면 500이 나감).
+        // 다만 "후기든 신고든 하나만" 규칙 자체는 activity_review/no_show_report가 서로
+        // 다른 테이블이라 DB 제약으로는 보장되지 않는다 — 같은 사용자가 같은 활동에 대해
+        // 후기와 신고를 거의 동시에 보내면 이 existsBy 체크만으로는 둘 다 통과해 둘 다 저장될
+        // 수 있다(애플리케이션 레벨 방어일 뿐). 발생 확률이 낮고(서로 다른 두 엔드포인트를
+        // 동시에 호출해야 함) 막으려면 락이 필요해서 지금은 감수한다 (PR #83 리뷰).
         if (activityReviewRepository.existsByActivityMatchIdAndReviewerUserId(activityMatchId, reviewerId)
                 || noShowReportRepository.existsByActivityMatchIdAndReporterUserId(activityMatchId, reviewerId)) {
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
@@ -181,34 +186,40 @@ public class ActivityFeedbackService {
     // 원자적으로 처리되므로 "trust_profile 행이 없는 같은 사용자에게 서로 다른 두 매칭에서
     // 거의 동시에 후기가 들어오는" 경우에도 PK 충돌(UPDATE 0행 → 두 트랜잭션 모두 INSERT 시도)이
     // 생기지 않는다 (PR #83 리뷰로 발견된 레이스).
+    //
+    // completed_activity_count는 일부러 안 건드린다 — "상대가 후기를 써줄 때만 오른다"는
+    // 지금 정의로 값을 쌓기 시작하면, 후기 작성률이 100%가 아닌 이상 구조적으로 실제보다
+    // 적게 집계되고, 이미 모집 탭 목록/호스트·신청자 프로필/마이페이지 세 곳에 노출되는 값이라
+    // 나중에 "활동 종료 시점 기준"으로 재정의할 때 과거 데이터 소급 보정이 필요해진다.
+    // 정의가 확정되기 전까지는 컬럼 기본값 0(= "아직 미구현")으로 남겨둔다 (후속 이슈, PR #83 리뷰).
     private void applyReviewToTrustProfile(Long userId, Integer rating, TalkLevel talkLevel) {
         boolean isSilent = talkLevel == TalkLevel.SILENT;
 
         if (isSilent) {
             jdbcTemplate.update("""
                 INSERT INTO trust_profile
-                    (user_id, average_rating, review_count, completed_activity_count, review_silent_vote_count)
-                VALUES (?, ?, 1, 1, 1)
+                    (user_id, average_rating, review_count, review_silent_vote_count)
+                VALUES (?, ?, 1, 1)
                 ON CONFLICT (user_id) DO UPDATE SET
                     average_rating = ROUND(
                         (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
                         / (trust_profile.review_count + 1), 1),
                     review_count = trust_profile.review_count + 1,
-                    completed_activity_count = trust_profile.completed_activity_count + 1,
-                    review_silent_vote_count = trust_profile.review_silent_vote_count + 1
+                    review_silent_vote_count = trust_profile.review_silent_vote_count + 1,
+                    updated_at = now()
                 """, userId, rating);
         } else {
             jdbcTemplate.update("""
                 INSERT INTO trust_profile
-                    (user_id, average_rating, review_count, completed_activity_count, review_light_chat_vote_count)
-                VALUES (?, ?, 1, 1, 1)
+                    (user_id, average_rating, review_count, review_light_chat_vote_count)
+                VALUES (?, ?, 1, 1)
                 ON CONFLICT (user_id) DO UPDATE SET
                     average_rating = ROUND(
                         (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
                         / (trust_profile.review_count + 1), 1),
                     review_count = trust_profile.review_count + 1,
-                    completed_activity_count = trust_profile.completed_activity_count + 1,
-                    review_light_chat_vote_count = trust_profile.review_light_chat_vote_count + 1
+                    review_light_chat_vote_count = trust_profile.review_light_chat_vote_count + 1,
+                    updated_at = now()
                 """, userId, rating);
         }
     }
@@ -221,7 +232,8 @@ public class ActivityFeedbackService {
             INSERT INTO trust_profile (user_id, no_show_report_count)
             VALUES (?, 1)
             ON CONFLICT (user_id) DO UPDATE SET
-                no_show_report_count = trust_profile.no_show_report_count + 1
+                no_show_report_count = trust_profile.no_show_report_count + 1,
+                updated_at = now()
             """, userId);
     }
 }
