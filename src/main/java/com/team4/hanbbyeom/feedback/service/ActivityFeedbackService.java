@@ -63,11 +63,12 @@ public class ActivityFeedbackService {
         // 두 번 요청을 보내면(더블클릭 등) 둘 다 이 체크를 통과할 수 있다 — 그다음은
         // uq_activity_review_once UNIQUE 제약이 최종 방어선이고, 그 위반을 아래 catch에서
         // FeedbackAlreadySubmittedException(409)으로 바꿔준다(안 그러면 500이 나감).
-        // 다만 "후기든 신고든 하나만" 규칙 자체는 activity_review/no_show_report가 서로
-        // 다른 테이블이라 DB 제약으로는 보장되지 않는다 — 같은 사용자가 같은 활동에 대해
-        // 후기와 신고를 거의 동시에 보내면 이 existsBy 체크만으로는 둘 다 통과해 둘 다 저장될
-        // 수 있다(애플리케이션 레벨 방어일 뿐). 발생 확률이 낮고(서로 다른 두 엔드포인트를
-        // 동시에 호출해야 함) 막으려면 락이 필요해서 지금은 감수한다 (PR #83 리뷰).
+        // "후기든 신고든 하나만" 규칙 자체는 activity_review/no_show_report가 서로 다른
+        // 테이블이라 각 테이블의 UNIQUE 제약만으로는 교차 보장되지 않는다 — 그래서 위
+        // validateAndGetCounterpart()에서 activity_match 행을 비관적 락으로 먼저 잠가,
+        // 같은 사용자가 같은 활동에 후기와 신고를 거의 동시에 보내는 경우를 직렬화한다.
+        // 이 existsBy 체크는 그 락 덕분에 항상 "다른 트랜잭션이 이미 커밋한 결과"를 정확히
+        // 보고 판단한다 (PR #83 리뷰로 발견된 레이스, ActivityMatchRepository.findByIdForUpdate 참고).
         if (activityReviewRepository.existsByActivityMatchIdAndReviewerUserId(activityMatchId, reviewerId)
                 || noShowReportRepository.existsByActivityMatchIdAndReporterUserId(activityMatchId, reviewerId)) {
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
@@ -139,6 +140,12 @@ public class ActivityFeedbackService {
     }
 
     // submitReview/submitNoShowReport 공통 검증.
+    // 0) 이 활동 행을 비관적 락으로 먼저 잠근다 — activity_review/no_show_report가 서로 다른
+    //    테이블이라 "후기든 신고든 하나만" 규칙을 DB UNIQUE 제약만으로 교차 보장할 수 없어서,
+    //    같은 사용자가 같은 활동에 후기와 신고를 거의 동시에 보내는 경우를 이 락으로 직렬화한다
+    //    (ActivityMatchRepository.findByIdForUpdate 참고, PR #83 리뷰로 발견된 레이스).
+    //    이 메서드는 submitReview/submitNoShowReport 양쪽에서 항상 먼저 호출되므로, 두 제출
+    //    경로 모두 같은 activityMatchId에 대해 이 잠금으로 순서가 강제된다.
     // 1) 매칭이 확정된 적 있는지(PROPOSED 상태로 끝난 매칭엔 애초에 활동 자체가 없었음)
     // 2) 요청자가 실제 이 매칭의 참가자인지
     // 3) 활동이 실제로 끝났는지 — status가 ENDED로 바뀌는 걸 기다리지 않고
@@ -147,7 +154,7 @@ public class ActivityFeedbackService {
     //    놓치지 않기 위함 (PR 리뷰로 발견된 포인트)
     // 검증을 통과하면 "상대방(내가 후기/신고를 남길 대상)"의 userId를 반환한다.
     private Long validateAndGetCounterpart(Long activityMatchId, Long requesterId) {
-        ActivityMatch activityMatch = activityMatchRepository.findById(activityMatchId)
+        ActivityMatch activityMatch = activityMatchRepository.findByIdForUpdate(activityMatchId)
                 .orElseThrow(() -> new ActivityMatchNotFoundException("존재하지 않는 매칭이에요."));
 
         boolean wasConfirmed = activityMatch.getStatus() == ActivityMatchStatus.CONFIRMED
