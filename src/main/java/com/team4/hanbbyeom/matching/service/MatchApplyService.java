@@ -258,7 +258,8 @@ public class MatchApplyService {
             case CONFIRMED, ENDED -> "ACCEPTED";
             case REJECTED -> applicantUserId.equals(closedByUserId) ? "CANCELLED" : "REJECTED";
             case EXPIRED -> "REJECTED";
-            // CANCELLED는 확정 후 취소된 매칭(현재는 참가자 회원 탈퇴 시 시스템이 처리, closedByUserId=null)이다.
+            // CANCELLED는 확정 후 취소된 매칭(참가자가 직접 취소했으면 closedByUserId=취소한 사용자, 회원 탈퇴로
+            // 시스템이 처리했으면 closedByUserId=null)이다.
             // "취소함" 탭은 신청자가 직접 취소한 건만 담으므로(MyApplicationResponse 주석), 신청자 본인이
             // 닫은 경우만 CANCELLED로 두고 그 외는 "내 신청이 성사되지 않음"인 REJECTED로 묶는다.
             case CANCELLED -> applicantUserId.equals(closedByUserId) ? "CANCELLED" : "REJECTED";

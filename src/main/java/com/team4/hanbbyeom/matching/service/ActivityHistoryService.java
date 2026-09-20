@@ -42,8 +42,8 @@ public class ActivityHistoryService {
     // 취소 주체를 내 시점으로 표현한다. CANCELLED가 아니면 null이다(ENDED 등도 closed_by_user_id가 NULL이라
     // 그대로 SYSTEM으로 내려주면 오해를 부른다).
     // 사용자가 직접 취소하면 activity_match.closed_by_user_id에 그 사용자 id가 채워지고(스키마 정의: 직접 행동으로
-    // 닫은 사용자, 자동 처리는 NULL), 회원 탈퇴로 인한 취소는 NULL이다(ActivityMatch.cancelByWithdrawal()).
-    // 그래서 취소 기능이 생겨도 이 응답 형식은 바뀌지 않는다.
+    // 닫은 사용자, 자동 처리는 NULL — ActivityMatch.cancelByParticipant()), 회원 탈퇴로 인한 취소는 NULL이다
+    // (ActivityMatch.cancelByWithdrawal()).
     private String toCancelledBy(String status, Long closedByUserId, Long userId) {
         if (!ActivityMatchStatus.CANCELLED.name().equals(status)) {
             return null;
