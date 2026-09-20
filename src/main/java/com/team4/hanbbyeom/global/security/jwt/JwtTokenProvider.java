@@ -56,6 +56,10 @@ public class JwtTokenProvider {
     public String createAccessToken(
             Long userId // 토큰을 발급받는 사용자 Id
     ) {
+        // 의도적으로 TimeConfig의 Clock 빈을 쓰지 않는다(#94에서 검토 후 제외).
+        // 토큰의 iat/exp는 JJWT 파서(및 원칙적으로 외부 시스템)가 실제 시각으로 검증하는 보안 값이라,
+        // 비즈니스 규칙용 Clock에 묶으면 테스트에서 시계를 과거로 고정했을 때 발급 즉시 만료된 토큰이
+        // 나와 검증(401)에 걸린다 — 실제로 채팅 통합 테스트 5건이 그 이유로 깨졌던 이력이 있다.
         Instant now = Instant.now(); // 현재 시각 가져옴 (발급시각, 만료시각 계산에 사용)
 
         return Jwts.builder() // JJWT 라이브러리에서 JWT를 만들기 위한 Builder 객체를 생성

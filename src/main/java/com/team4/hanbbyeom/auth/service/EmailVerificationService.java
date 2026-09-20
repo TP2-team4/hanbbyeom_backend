@@ -21,6 +21,7 @@ import java.security.InvalidKeyException; // HMAC에 넘긴 비밀키가 올바�
 import java.security.MessageDigest; // 타이밍 공격 방지용 정해진 시간 비교(isEqual) 제공
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64; // Base64 문자열 ↔ 바이트 배열 변환
@@ -46,6 +47,9 @@ public class EmailVerificationService {
     // Service 동작에 필요한 도구(의존성) 선언 필드
     private final EmailVerificationRepository emailVerificationRepository; // 이메일 인증 기록을 DB에 저장하고 조회하기 위해 사용
     private final JavaMailSender mailSender; // (Spring 제공) 메일 발송 도구 인터페이스
+    // 만료·재전송 대기 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    // @RequiredArgsConstructor가 final 필드를 생성자 파라미터로 자동 추가한다
+    private final Clock clock;
 
     // 인증 코드 해시(HMAC-SHA256)용 서버 전용 비밀키 (application.yaml → .env)
     // DB만 유출된 경우 이 키가 없으면 인증 코드를 역산할 수 없도록 함
@@ -62,7 +66,7 @@ public class EmailVerificationService {
 
         String code = generateCode(); // 인증번호 생성
         String codeHash = hash(code); // 인증번호 해시 (DB에는 해시값 저장)
-        Instant expiresAt = Instant.now().plus(CODE_EXPIRATION); // 만료시간 계산
+        Instant expiresAt = Instant.now(clock).plus(CODE_EXPIRATION); // 만료시간 계산
 
         // DB 저장
         emailVerificationRepository.save(
@@ -96,7 +100,7 @@ public class EmailVerificationService {
         }
 
         // 유효기간이 지났는지 확인
-        if (Instant.now() // 현재 시각
+        if (Instant.now(clock) // 현재 시각
                 .isAfter( // 검사: 현재 시각이 만료 시각보다 나중인가?
                         verification.getExpiresAt() // DB에 저장된 인증번호 만료 시각
                 )
@@ -117,7 +121,7 @@ public class EmailVerificationService {
         }
 
         // 일치하면 인증 완료 처리
-        verification.markVerified(Instant.now());
+        verification.markVerified(Instant.now(clock));
     }
 
     // 조회만 하고 값을 변경하지 않으므로 readOnly = true (성능 최적화, 실수로 값 변경 시 예외 발생)
@@ -169,7 +173,7 @@ public class EmailVerificationService {
                     Instant nextAllowedAt = latest.getCreatedAt().plus(RESEND_INTERVAL);
 
                     // 현재 시간이 다음 허용 시간보다 이전인지 확인
-                    if (Instant.now().isBefore(nextAllowedAt)) {
+                    if (Instant.now(clock).isBefore(nextAllowedAt)) {
                         // 아직 60초가 지나지 않았으면 예외 던져서 메서드 실행 중단
                         throw new IllegalStateException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
                     }

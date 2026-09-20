@@ -14,7 +14,10 @@ import org.mockito.InOrder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,11 +30,16 @@ import static org.mockito.Mockito.when;
 
 class MatchRequestCommandServiceTest {
 
+    // 서비스가 TimeConfig의 Clock 빈으로 "지금"을 읽으므로(#94), 테스트에서는 고정 시계를 넣어
+    // 실행 시점과 무관하게 항상 같은 결과가 나오게 한다.
+    private static final Instant FIXED_NOW = Instant.parse("2026-09-19T10:00:00Z");
+    private final Clock fixedClock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
+
     private final MatchRequestRepository matchRequestRepository = mock(MatchRequestRepository.class);
     private final RunConditionService runConditionService = mock(RunConditionService.class);
     private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
     private final MatchRequestCommandService service =
-            new MatchRequestCommandService(matchRequestRepository, runConditionService, jdbcTemplate);
+            new MatchRequestCommandService(matchRequestRepository, runConditionService, jdbcTemplate, fixedClock);
 
     @Test
     void 시작_시각이_너무_임박하면_예외가_발생한다() {
@@ -42,7 +50,7 @@ class MatchRequestCommandServiceTest {
                 9000,
                 360,
                 400,
-                OffsetDateTime.now().plusMinutes(30), // 최소 리드타임(3시간)보다 훨씬 임박함
+                OffsetDateTime.ofInstant(FIXED_NOW, ZoneOffset.UTC).plusMinutes(30), // 최소 리드타임(3시간)보다 훨씬 임박함
                 "SILENT"
         );
 

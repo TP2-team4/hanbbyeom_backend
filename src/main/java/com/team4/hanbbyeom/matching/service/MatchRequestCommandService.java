@@ -18,6 +18,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 
 @Service
@@ -29,13 +30,17 @@ public class MatchRequestCommandService {
     private final MatchRequestRepository matchRequestRepository;
     private final RunConditionService runConditionService; // 새로 주입
     private final JdbcTemplate jdbcTemplate; // 취소 시 matching_mutex 락을 잡기 위해 사용
+    // 등록 최소 리드타임 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    private final Clock clock;
 
     public MatchRequestCommandService(MatchRequestRepository matchRequestRepository,
                                       RunConditionService runConditionService,
-                                      JdbcTemplate jdbcTemplate) {
+                                      JdbcTemplate jdbcTemplate,
+                                      Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.runConditionService = runConditionService;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 모집글(match_request)을 SEARCHING 상태로 새로 만들고, 같은 트랜잭션 안에서 러닝 조건까지
@@ -141,7 +146,7 @@ public class MatchRequestCommandService {
     // — 한때 이 값을 24시간보다 크게 고정하는 방식으로 고쳤었으나, 당일 등록·매칭이라는
     // 핵심 시나리오를 막아버려 되돌렸다.)
     private void validateScheduledAt(OffsetDateTime scheduledAt) {
-        OffsetDateTime minAllowed = OffsetDateTime.now().plusHours(MIN_LEAD_HOURS);
+        OffsetDateTime minAllowed = OffsetDateTime.now(clock).plusHours(MIN_LEAD_HOURS);
         if (scheduledAt.isBefore(minAllowed)) {
             throw new InvalidMatchRequestException(
                     "활동 시작 시각은 지금부터 최소 " + MIN_LEAD_HOURS + "시간 이후여야 해요."
