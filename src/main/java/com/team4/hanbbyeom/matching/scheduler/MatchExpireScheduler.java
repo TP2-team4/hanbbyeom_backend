@@ -1,12 +1,20 @@
 package com.team4.hanbbyeom.matching.scheduler;
 
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 // 매칭 관련 주기적 정리 작업 2가지를 담당한다.
 // 로직 자체는 MatchDecisionService에 있고, 이 클래스는 "언제 실행할지"만 담당한다.
+//
+// app.scheduling.enabled=false로 끌 수 있다(기본값은 켜짐이라 운영 동작은 그대로). 테스트에서는 끈다
+// (src/test/resources/application.properties). 스케줄러 스레드가 컨텍스트가 뜨자마자(fixedDelay는 초기 지연이 없다)
+// 서비스를 실행하는데, 서비스가 Clock 빈을 쓰므로(#94) Clock을 목으로 바꾼 테스트(ChatMessageIntegrationTest)에서는
+// 스케줄러 스레드와 테스트 스레드가 같은 목을 동시에 건드려 스터빙이 ClassCastException으로 깨지는 경합이 생긴다.
+// 또한 캐시된 각 테스트 컨텍스트마다 스케줄러가 같은 DB를 주기적으로 건드려, 커밋된 픽스처를 쓰는 동시성 테스트와도 간섭할 수 있다.
 @Component
+@ConditionalOnProperty(name = "app.scheduling.enabled", havingValue = "true", matchIfMissing = true)
 public class MatchExpireScheduler {
 
     private final MatchDecisionService matchDecisionService;
