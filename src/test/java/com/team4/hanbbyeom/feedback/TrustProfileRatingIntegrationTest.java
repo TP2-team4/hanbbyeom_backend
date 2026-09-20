@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -153,11 +155,15 @@ class TrustProfileRatingIntegrationTest {
                 .andExpect(jsonPath("$.completedCount").value(2));
     }
 
-    // V16 마이그레이션의 보정 SQL을 과거 데이터에 다시 실행해 결과를 확인한다.
-    // 후기 없는 기존 행(0.0)은 NULL이 되고 후기가 있는 행은 그대로여야 한다.
+    // V16 마이그레이션 SQL을 과거 데이터에 다시 실행해 결과를 확인한다.
+    // 후기 없는 기존 행(0.0)은 NULL이 되고 후기가 있는 행은 그대로여야 하며, 범위 제약은 1.0~5.0으로 다시 만들어져야 한다.
+    // 테스트 DB에는 V16이 이미 적용돼 0.0을 넣을 수 없으므로, 먼저 제약을 지워 V16 이전 스키마(0.0 허용)를 재현한다.
+    // 0.0 행이 남은 채로 새 제약을 추가하면 검증에 실패하므로, 이 테스트는 "보정 UPDATE가 제약 추가보다 먼저"라는
+    // 순서도 함께 검증한다.
     @Test
-    @DisplayName("V16 보정: 후기 없는 기존 행의 별점 0.0은 null이 되고 후기가 있는 행은 유지된다")
+    @DisplayName("V16 보정: 후기 없는 기존 행의 0.0은 null이 되고 후기가 있는 행은 유지되며 제약은 1.0~5.0이 된다")
     void 마이그레이션_보정을_검증한다() throws Exception {
+        jdbcTemplate.execute("ALTER TABLE trust_profile DROP CONSTRAINT chk_trust_profile_rating");
         Long legacyNoReview = createUser("과거후기없음");
         Long legacyReviewed = createUser("과거후기있음");
         jdbcTemplate.update(
@@ -171,5 +177,61 @@ class TrustProfileRatingIntegrationTest {
 
         assertThat(storedRating(legacyNoReview)).isNull();
         assertThat(storedRating(legacyReviewed)).isEqualByComparingTo("4.5");
+        assertThat(ratingConstraintDefinition()).contains("1.0").doesNotContain("0.0");
+    }
+
+    // ---- 평균 별점 범위 제약(chk_trust_profile_rating: 1.0~5.0 또는 NULL) ----
+    // 제약 위반은 트랜잭션을 중단시키므로 거부 케이스는 테스트 하나에 위반을 하나만 둔다.
+
+    private String ratingConstraintDefinition() {
+        return jdbcTemplate.queryForObject(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_trust_profile_rating'",
+                String.class);
+    }
+
+    @Test
+    @DisplayName("평균 별점 0.0은 더 이상 유효하지 않아 DB가 거부한다")
+    void 평균_별점_0점은_거부된다() {
+        Long user = createUser("영점");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO trust_profile (user_id, average_rating, review_count) VALUES (?, 0.0, 1)", user))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("평균 별점이 1.0 미만(0.9)이면 DB가 거부한다")
+    void 평균_별점_1점_미만은_거부된다() {
+        Long user = createUser("일점미만");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO trust_profile (user_id, average_rating, review_count) VALUES (?, 0.9, 1)", user))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("평균 별점이 5.0을 넘으면(5.1) DB가 거부한다")
+    void 평균_별점_5점_초과는_거부된다() {
+        Long user = createUser("오점초과");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO trust_profile (user_id, average_rating, review_count) VALUES (?, 5.1, 1)", user))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("평균 별점은 1.0, 5.0, 그리고 후기가 없을 때의 null을 허용한다")
+    void 평균_별점_경계값과_null은_허용된다() {
+        Long min = createUser("최저");
+        Long max = createUser("최고");
+        Long none = createUser("없음");
+
+        jdbcTemplate.update("INSERT INTO trust_profile (user_id, average_rating, review_count) VALUES (?, 1.0, 1)", min);
+        jdbcTemplate.update("INSERT INTO trust_profile (user_id, average_rating, review_count) VALUES (?, 5.0, 1)", max);
+        jdbcTemplate.update("INSERT INTO trust_profile (user_id) VALUES (?)", none);
+
+        assertThat(storedRating(min)).isEqualByComparingTo("1.0");
+        assertThat(storedRating(max)).isEqualByComparingTo("5.0");
+        assertThat(storedRating(none)).isNull();
     }
 }
