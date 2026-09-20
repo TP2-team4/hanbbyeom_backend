@@ -161,12 +161,12 @@ public class RunApiIntegrationTest {
         mockMvc.perform(get("/api/matching/board")
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(otherUserId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]", matchRequestId).exists())
-                .andExpect(jsonPath("$[?(@.id == %d)].courseName".formatted(matchRequestId)).value("뚝섬 한강공원"))
-                .andExpect(jsonPath("$[?(@.id == %d)].distanceMinMeters".formatted(matchRequestId)).value(5000))
-                .andExpect(jsonPath("$[?(@.id == %d)].distanceMaxMeters".formatted(matchRequestId)).value(8000))
-                .andExpect(jsonPath("$[?(@.id == %d)].paceMinSec".formatted(matchRequestId)).value(360))
-                .andExpect(jsonPath("$[?(@.id == %d)].paceMaxSec".formatted(matchRequestId)).value(400));
+                .andExpect(jsonPath("$.items[?(@.id == %d)]", matchRequestId).exists())
+                .andExpect(jsonPath("$.items[?(@.id == %d)].courseName".formatted(matchRequestId)).value("뚝섬 한강공원"))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].distanceMinMeters".formatted(matchRequestId)).value(5000))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].distanceMaxMeters".formatted(matchRequestId)).value(8000))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].paceMinSec".formatted(matchRequestId)).value(360))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].paceMaxSec".formatted(matchRequestId)).value(400));
     }
 
     // 3. 경계값 테스트: 거리/페이스가 허용 범위의 정확한 경계값이면 정상 등록되어야 함

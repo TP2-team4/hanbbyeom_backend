@@ -246,7 +246,7 @@ class UserNicknameIntegrationTest {
                 """,
                 post.getId(), courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400
         );
-        String boardPath = "$[?(@.id == " + post.getId() + ")].author.nickname";
+        String boardPath = "$.items[?(@.id == " + post.getId() + ")].author.nickname";
 
         mockMvc.perform(get("/api/matching/board").header(HttpHeaders.AUTHORIZATION, bearerToken(viewer.getId())))
                 .andExpect(jsonPath(boardPath).value(hasItem("옛날닉네임")));

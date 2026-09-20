@@ -142,12 +142,22 @@ class MatchingFlowIntegrationTest {
         // 있는데, apply()가 이걸 raw SQL로 직접 조회하므로 명시적으로 flush해서 보이게 한다.
         entityManager.flush();
 
-        // → 모집 탭에 노출되는지 확인
+        // → 모집 탭에 노출되는지 확인. 응답은 커서 페이징 래퍼(items/nextCursor/hasNext, 이슈 #103)
         mockMvc.perform(get("/api/matching/board")
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).exists())
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.nextCursor").value(org.hamcrest.Matchers.nullValue()));
+
+        // → size 범위 밖(1~50)은 400 (IllegalArgumentException → GlobalExceptionHandler)
+        mockMvc.perform(get("/api/matching/board").param("size", "0")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/matching/board").param("size", "51")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isBadRequest());
 
         // 2) 사용자 B가 필터로 게시글을 찾은 뒤, 호스트 신뢰 프로필 조회
         mockMvc.perform(get("/api/matching/board/{requestId}/host-profile", hostRequestId)
@@ -170,7 +180,7 @@ class MatchingFlowIntegrationTest {
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
 
         // 4) 사용자 A가 대기 중인 신청을 조회 → 신청자 프로필 확인 → 수락
         mockMvc.perform(get("/api/matching/requests/{id}/pending-application", hostRequestId)
@@ -301,7 +311,7 @@ class MatchingFlowIntegrationTest {
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).exists());
 
         // → 신청자(B) 본인이 이 매칭 건을 조회하면 REJECTED임을 구분해서 알 수 있어야 한다
         // (게시글 상태만 보면 거절인지 자동만료인지 구분 불가 — 팀원 피드백 반영)
@@ -349,7 +359,7 @@ class MatchingFlowIntegrationTest {
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).exists());
 
         // → 신청자(B) 본인이 조회하면 REJECTED가 아니라 EXPIRED로 구분돼서 보여야 한다
         mockMvc.perform(get("/api/matching/matches/{activityMatchId}", activityMatchId)
@@ -487,7 +497,7 @@ class MatchingFlowIntegrationTest {
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).exists());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).exists());
 
         // 탈퇴 상태(chk_users_account_lifecycle: 개인정보 전부 NULL + deleted_at 기록)로 변경
         jdbcTemplate.update(
@@ -505,7 +515,7 @@ class MatchingFlowIntegrationTest {
                         .param("course", "뚝섬 한강공원")
                         .header(HttpHeaders.AUTHORIZATION, bearerTokenOf(viewerUserId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).doesNotExist());
     }
 
     // 회귀 테스트: 탈퇴한 신청자의 신청을 호스트가 수락하면 서버 오류(500)가 아니라 사유가 담긴 409로
