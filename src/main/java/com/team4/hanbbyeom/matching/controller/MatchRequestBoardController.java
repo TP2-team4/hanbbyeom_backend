@@ -97,7 +97,11 @@ public class MatchRequestBoardController {
     // activityMatchId 경로가 담긴다(201 Created).
     @Operation(summary = "모집글 신청",
             description = "요청 바디는 필요 없습니다(신청자는 본인 게시글 없이도 신청할 수 있습니다). " +
-                    "성공 시 생성된 activity_match id로의 경로가 Location 헤더에 담깁니다.")
+                    "성공 시 생성된 activity_match id로의 경로가 Location 헤더에 담깁니다. " +
+                    "실패 응답: 400 — 본인 게시글이거나 활동 시작이 너무 임박해 신청할 수 없음, 404 — 존재하지 않는 모집글, " +
+                    "409 — 이미 마감되었거나 신청이 진행 중인 모집글(작성자가 이미 다른 신청·활동 중인 경우 포함), " +
+                    "또는 내가 이미 진행 중인 신청·활동이 있음. 목록에 보이는 글도 이 응답으로 신청이 거절될 수 있으므로 " +
+                    "메시지를 그대로 안내한 뒤 목록을 새로고침하세요.")
     @PostMapping("/{requestId}/apply")
     public ResponseEntity<Void> apply(
             @PathVariable Long requestId,

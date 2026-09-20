@@ -74,6 +74,19 @@ public class MatchApplyService {
             throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
         }
 
+        // 사용자당 활성 참가는 하나뿐이다(uq_participant_active_user). 이미 다른 글에 신청 중이거나 확정된 활동이 있는 사람이 관여하면
+        // 아래 match_participant INSERT가 그 제약 위반으로 500이 되므로, 미리 걸러 409로 원인을 알린다.
+        // 참가는 신청 시점에 만들어지고 신청은 신청자 본인 게시글의 상태를 바꾸지 않아, 본인 글이 있는 사람은 다른 글에 신청해도
+        // 그 글이 계속 SEARCHING으로 목록에 보인다 — 그 글에 온 신청도 같은 이유로 걸러야 한다.
+        if (matchParticipantRepository.findActiveActivityMatchIdByUserId(applicantUserId).isPresent()) {
+            throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 신청이나 활동이 있어요.");
+        }
+        // 호스트가 이미 다른 신청·활동에 묶여 있으면 이 글로는 새 매칭을 만들 수 없다. 신청자 입장에서는 "지금 신청할 수 없는 글"이라
+        // 다른 진행 중 신청과 같은 메시지를 쓴다(호스트의 사정을 자세히 드러내지 않는다).
+        if (matchParticipantRepository.findActiveActivityMatchIdByUserId(hostRequest.getUserId()).isPresent()) {
+            throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
+        }
+
         // 3) 호스트의 run_match_condition + running_course 조회 (코스명/거리/페이스/만나는 곳)
         Map<String, Object> condition = jdbcTemplate.queryForMap(
                 """
