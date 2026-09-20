@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -25,15 +26,19 @@ public class MatchApplyService {
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final JdbcTemplate jdbcTemplate;
+    // 응답 기한 계산·임박 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    private final Clock clock;
 
     public MatchApplyService(MatchRequestRepository matchRequestRepository,
                              ActivityMatchRepository activityMatchRepository,
                              MatchParticipantRepository matchParticipantRepository,
-                             JdbcTemplate jdbcTemplate) {
+                             JdbcTemplate jdbcTemplate,
+                             Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 호스트 게시글에 신청을 넣는 기능. 성공하면 activity_match를 PROPOSED로 새로 만들고,
@@ -90,7 +95,7 @@ public class MatchApplyService {
         String courseName = (String) condition.get("course_name");
         String routeDescription = (String) condition.get("route_description");
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         OffsetDateTime scheduledAt = hostRequest.getScheduledAt();
         // scheduled_end_at은 프론트에 노출되지 않는 내부용 컬럼이라 정밀 계산 없이 고정 버퍼로 처리
         OffsetDateTime scheduledEndAt = scheduledAt.plusHours(ACTIVITY_DURATION_HOURS);
