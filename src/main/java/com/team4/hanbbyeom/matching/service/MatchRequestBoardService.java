@@ -63,8 +63,8 @@ public class MatchRequestBoardService {
                 region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId
         );
 
-        Map<Long, String> nicknameByUserId = fetchNicknames(rows.stream().map(MatchRequestRepository.MatchBoardRow::getUserId).toList());
-
+        // 작성자 닉네임은 searchBoard가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
+        // (예전엔 fetchNicknames()를 한 번 더 호출해 결과를 버리고 있었다 — 목록 조회마다 DB 왕복 1회 낭비)
         return rows.stream()
                 .map(row -> new MatchBoardItemResponse(
                         row.getId(),
