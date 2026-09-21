@@ -267,6 +267,6 @@ public class RunConditionServiceTest {
         matchRequest.changeStatus(MatchRequestStatus.PENDING_CONFIRMATION);
 
         assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, validUpdateRequest()))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(MatchRequestNotSearchingException.class);
     }
 }

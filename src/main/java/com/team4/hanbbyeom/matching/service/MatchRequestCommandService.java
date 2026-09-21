@@ -84,9 +84,18 @@ public class MatchRequestCommandService {
 
     // 일정(scheduledAt)·대화 수준만 수정한다 — 코스/거리/페이스/만나는 곳은 RunConditionService
     // (팀원 B) 담당이라 여기서 다루지 않는다. 상태 전이는 없고(SEARCHING 유지), SEARCHING이
-    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 IllegalStateException을 던진다.
+    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 MatchRequestNotSearchingException(409)을 던진다
+    // (취소·러닝 조건 삭제와 같은 "지금 상태에서는 불가능"이라는 거절이라 400이 아니라 409다).
+    //
+    // 신청·수락·거절·취소·탈퇴 정리와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 이 메서드가 게시글을 읽은 뒤
+    // apply()가 게시글을 PENDING_CONFIRMATION으로 바꿔 커밋했을 때, 낡은 SEARCHING으로 상태 검사를 통과하고 커밋 시점에
+    // 게시글의 모든 컬럼을 UPDATE(엔티티에 @DynamicUpdate/@Version이 없다)해 status를 SEARCHING으로 되돌린다. 그러면
+    // 신청이 걸린 PROPOSED 매칭이 살아 있는데 게시글은 모집 중으로 보이고, 다음 신청은 호스트의 활성 참가
+    // (uq_participant_active_user)에 걸려 실패한다. 락을 잡은 뒤에 읽으므로 이미 커밋된 신청·취소의 결과를 정확히 본다.
     @Transactional
     public void update(Long userId, Long matchRequestId, MatchRequestUpdateRequest request) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "수정");
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);

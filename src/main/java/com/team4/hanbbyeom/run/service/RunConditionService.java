@@ -14,6 +14,7 @@ import com.team4.hanbbyeom.run.exception.RunMatchConditionNotFoundException;
 import com.team4.hanbbyeom.run.repository.RunMatchConditionRepository;
 import com.team4.hanbbyeom.run.repository.RunningCourseRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ public class RunConditionService {
     private final RunMatchConditionRepository runMatchConditionRepository;
     private final RunningCourseRepository runningCourseRepository;
     private final MatchRequestRepository matchRequestRepository;
+    private final JdbcTemplate jdbcTemplate; // 수정·삭제 시 matching_mutex 락을 잡기 위해 사용
 
     @Transactional // 메서드 내부 작업을 하나의 트랜잭션으로 묶어 쓰기 작업 수행
     public Long create(Long currentUserId, RunConditionCreateRequest request) {
@@ -91,15 +93,20 @@ public class RunConditionService {
         return RunConditionResponse.from(condition);
     }
 
+    // 신청·수락·거절·취소와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 아래 상태 검사(SEARCHING)를 통과한 직후
+    // apply()가 게시글을 PENDING_CONFIRMATION으로 바꿔 커밋해도, 신청자가 본 조건이 신청이 걸린 뒤에 바뀐다.
+    // 락을 잡은 뒤에 읽으므로 이미 커밋된 신청의 결과를 정확히 본다.
     @Transactional
     public void update(Long currentUserId, Long matchRequestId, RunConditionUpdateRequest request) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         // 기존 조건 데이터 조회 및 본인 소유 권한 검증
         RunMatchCondition condition = getOwnedCondition(currentUserId, matchRequestId);
         // 상태 검증: MatchRequestCommandService.update()(일정/대화수준 수정)와 동일한 규칙 —
         // 이미 신청이 들어와 PENDING_CONFIRMATION/MATCHED가 된 뒤에는 신청자가 본 조건과
         // 달라지면 안 되므로, 모집 중(SEARCHING)일 때만 코스/거리/페이스/만나는 곳 수정을 허용한다.
         if (condition.getMatchRequest().getStatus() != MatchRequestStatus.SEARCHING) {
-            throw new IllegalStateException("모집 중인 게시글만 조건을 수정할 수 있어요.");
+            throw new MatchRequestNotSearchingException("모집 중인 게시글만 조건을 수정할 수 있어요.");
         }
         // 변경하려는 코스(RunningCourse) 존재 여부 검증
         RunningCourse runningCourse = runningCourseRepository.findById(request.courseId())
@@ -117,8 +124,13 @@ public class RunConditionService {
                 request.paceMaxSec());
     }
 
+    // 조건을 지우면 게시글이 CANCELLED가 되므로 모집글 취소(MatchRequestCommandService.cancel())의 또 다른 경로다. 취소와 같이
+    // matching_mutex 락을 먼저 잡는다. 락이 없으면 apply()가 게시글을 PENDING_CONFIRMATION으로 바꾸는 것과 동시에
+    // 들어온 삭제가 둘 다 SEARCHING으로 읽고 통과해 "게시글 CANCELLED + 매칭 PROPOSED" 불일치가 남는다(이슈 #100과 같은 문제).
     @Transactional
     public void delete(Long currentUserId, Long matchRequestId) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         // 기존 조건 데이터 조회 및 본인 소유 권한 검증
         RunMatchCondition condition = getOwnedCondition(currentUserId, matchRequestId);
         MatchRequest matchRequest = condition.getMatchRequest();

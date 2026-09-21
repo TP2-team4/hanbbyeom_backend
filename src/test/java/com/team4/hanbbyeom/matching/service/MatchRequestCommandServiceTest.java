@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
+import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
@@ -143,5 +144,52 @@ class MatchRequestCommandServiceTest {
         InOrder order = inOrder(jdbcTemplate, matchRequestRepository);
         order.verify(jdbcTemplate).queryForObject(contains("matching_mutex"), eq(Long.class));
         order.verify(matchRequestRepository).findById(POST_ID);
+    }
+
+    // ---- 모집글 수정 락 ----------------------------------------------------------------------------
+    // 수정도 신청·수락·거절·취소와 같은 matching_mutex 락을 잡아야 한다. 락 없이 읽으면 apply()가 게시글을
+    // PENDING_CONFIRMATION으로 바꿔 커밋한 뒤에도 낡은 SEARCHING으로 통과해, 커밋 시점에 status까지 되돌린다.
+
+    private static final OffsetDateTime UPDATE_SCHEDULED_AT = OffsetDateTime.ofInstant(FIXED_NOW, ZoneOffset.UTC).plusDays(2);
+
+    @Test
+    void 수정은_게시글을_읽기_전에_matching_mutex_락을_먼저_잡는다() {
+        postWithStatus(MatchRequestStatus.SEARCHING);
+
+        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT"));
+
+        InOrder order = inOrder(jdbcTemplate, matchRequestRepository);
+        order.verify(jdbcTemplate).queryForObject(contains("matching_mutex"), eq(Long.class));
+        order.verify(matchRequestRepository).findById(POST_ID);
+    }
+
+    @Test
+    void 모집_중인_게시글은_수정된다() {
+        MatchRequest post = postWithStatus(MatchRequestStatus.SEARCHING);
+
+        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT"));
+
+        assertThat(post.getScheduledAt()).isEqualTo(UPDATE_SCHEDULED_AT);
+        assertThat(post.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    @Test
+    void 신청이_걸린_게시글은_수정할_수_없고_일정과_상태가_바뀌지_않는다() {
+        MatchRequest post = postWithStatus(MatchRequestStatus.PENDING_CONFIRMATION);
+        OffsetDateTime before = post.getScheduledAt();
+
+        assertThatThrownBy(() -> service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT")))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+
+        assertThat(post.getScheduledAt()).isEqualTo(before);
+        assertThat(post.getStatus()).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);
+    }
+
+    @Test
+    void 수정도_본인_게시글이_아니면_403이다() {
+        postWithStatus(MatchRequestStatus.SEARCHING);
+
+        assertThatThrownBy(() -> service.update(999L, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT")))
+                .isInstanceOf(AccessDeniedException.class);
     }
 }
