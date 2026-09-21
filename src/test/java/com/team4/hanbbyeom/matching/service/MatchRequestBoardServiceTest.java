@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.matching.domain.AcceptStatus;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
@@ -647,7 +648,7 @@ class MatchRequestBoardServiceTest {
     @Test
     void 잘못된_sort_값은_거부한다() {
         assertThatThrownBy(() -> BoardSort.from("NEWEST"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidRequestValueException.class)
                 .hasMessageContaining("sort");
         assertThat(BoardSort.from("distance")).isEqualTo(BoardSort.DISTANCE); // 대소문자 무관
     }
@@ -765,10 +766,10 @@ class MatchRequestBoardServiceTest {
     void size가_범위_밖이면_거부한다() {
         assertThatThrownBy(() -> matchRequestBoardService.getBoard(
                 null, null, null, null, null, null, null, -1L, null, 0, BoardSort.LATEST))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
         assertThatThrownBy(() -> matchRequestBoardService.getBoard(
                 null, null, null, null, null, null, null, -1L, null, MatchRequestBoardService.BOARD_MAX_PAGE_SIZE + 1, BoardSort.LATEST))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
 
     // 존재하지 않는 cursor는 별도 검증(추가 쿼리) 없이 빈 페이지로 끝난다 — 프론트는 hasNext=false에서 멈춘다.

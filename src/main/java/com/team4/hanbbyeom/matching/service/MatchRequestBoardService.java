@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
@@ -67,7 +68,7 @@ public class MatchRequestBoardService {
                                            Long cursor, int size, BoardSort sort) {
         // 잘못된 값은 IllegalArgumentException → GlobalExceptionHandler가 400으로 응답 (채팅의 afterId 검증과 같은 방식)
         if (size < 1 || size > BOARD_MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException("size는 1 이상 " + BOARD_MAX_PAGE_SIZE + " 이하여야 합니다.");
+            throw new InvalidRequestValueException("size는 1 이상 " + BOARD_MAX_PAGE_SIZE + " 이하여야 합니다.");
         }
         // cursor 존재 여부는 따로 검증하지 않는다 — 존재하지 않는 id면 쿼리의 행 비교가 NULL이 돼서 빈 페이지
         // (items=[], hasNext=false)가 나오고, 프론트는 hasNext=false에서 멈추므로 해가 없다. 검증하려면 페이지마다
@@ -136,7 +137,7 @@ public class MatchRequestBoardService {
                 from = saturday;
                 to = saturday.plusDays(2); // 토요일 00:00 ~ 월요일 00:00 (토+일 포함)
             }
-            default -> throw new IllegalArgumentException("알 수 없는 datePreset: " + datePreset);
+            default -> throw new InvalidRequestValueException("알 수 없는 datePreset: " + datePreset);
         }
         return new OffsetDateTime[]{
                 from.atStartOfDay(zone).toOffsetDateTime(),

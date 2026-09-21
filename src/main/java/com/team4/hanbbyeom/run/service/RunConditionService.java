@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.run.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
@@ -48,7 +49,7 @@ public class RunConditionService {
         }
         // 선택한 코스(RunningCourse) 존재 여부 검증
         RunningCourse runningCourse = runningCourseRepository.findById(request.courseId())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 코스예요"));
+                .orElseThrow(() -> new InvalidRequestValueException("존재하지 않는 코스예요"));
         // 거리 범위 검증 (1,000m ~ 20,000m 및 min <= max 여부)
         validateRange(request.distanceMinMeters(), request.distanceMaxMeters(),
                 MIN_DISTANCE_METERS, MAX_DISTANCE_METERS, "거리");
@@ -110,7 +111,7 @@ public class RunConditionService {
         }
         // 변경하려는 코스(RunningCourse) 존재 여부 검증
         RunningCourse runningCourse = runningCourseRepository.findById(request.courseId())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 코스예요"));
+                .orElseThrow(() -> new InvalidRequestValueException("존재하지 않는 코스예요"));
         // 변경할 거리 및 페이스 범위 유효성 검증
         validateRange(request.distanceMinMeters(), request.distanceMaxMeters(), MIN_DISTANCE_METERS, MAX_DISTANCE_METERS, "거리");
         validateRange(request.paceMinSec(), request.paceMaxSec(), MIN_PACE_SEC, MAX_PACE_SEC, "페이스");
@@ -147,11 +148,11 @@ public class RunConditionService {
     private void validateRange(Integer min, Integer max, int allowedMin, int allowedMax, String label) {
         // 최소/최댓값이 시스템 허용 범위를 벗어나는지 확인
         if (min < allowedMin || max > allowedMax) {
-            throw new IllegalArgumentException(label + "는 " + allowedMin + "~" + allowedMax + " 범위 안이어야 해요.");
+            throw new InvalidRequestValueException(label + "는 " + allowedMin + "~" + allowedMax + " 범위 안이어야 해요.");
         }
         // 최솟값이 최댓값보다 크게 들어왔는지 확인
         if (min > max) {
-            throw new IllegalArgumentException(label + " 최소값이 최대값보다 클 수 없어요.");
+            throw new InvalidRequestValueException(label + " 최소값이 최대값보다 클 수 없어요.");
         }
     }
 }

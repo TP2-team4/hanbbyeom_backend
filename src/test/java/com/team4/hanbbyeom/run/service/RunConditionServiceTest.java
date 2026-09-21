@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.run.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
@@ -109,7 +110,7 @@ public class RunConditionServiceTest {
         );
 
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
     // 거리 최소값이 허용 범위보다 작거나, 최대값이 허용 범위보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
@@ -119,7 +120,7 @@ public class RunConditionServiceTest {
         );
 
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
     // 거리 최소값이 최대값보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
@@ -129,7 +130,7 @@ public class RunConditionServiceTest {
         );
 
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
     // 페이스 최소값이 허용 범위보다 작거나, 최대값이 허용 범위보다 크면 IllegalArgumentException 발생 여부 검증
     @Test
@@ -139,7 +140,7 @@ public class RunConditionServiceTest {
         );
 
         assertThatThrownBy(() -> runConditionService.create(ownerUserId, request))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
 
     // 유효한 수정 요청 DTO 생성 도우미 메서드
@@ -217,7 +218,7 @@ public class RunConditionServiceTest {
         );
 
         assertThatThrownBy(() -> runConditionService.update(ownerUserId, matchRequestId, request))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestValueException.class);
     }
 
     // 정상적인 삭제 시, 조건이 삭제되고 매칭 요청 상태가 CANCELLED로 바뀌는지 검증

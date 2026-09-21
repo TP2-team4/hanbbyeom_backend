@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.auth.dto.PasswordResetRequest;
 import com.team4.hanbbyeom.auth.exception.PasswordResetAuthenticationException;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
@@ -42,7 +43,7 @@ public class PasswordResetService {
         // 현재 비밀번호와 같은 값의 재설정 차단
         // 인증 기록 삭제 전에 검사해 다른 비밀번호로 다시 요청 가능
         if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
-            throw new IllegalArgumentException(SAME_PASSWORD_MESSAGE);
+            throw new InvalidRequestValueException(SAME_PASSWORD_MESSAGE);
         }
 
         // 새 비밀번호의 BCrypt 암호화와 관리 상태 User Entity 반영
