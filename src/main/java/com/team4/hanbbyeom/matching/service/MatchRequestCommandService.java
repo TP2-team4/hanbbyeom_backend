@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.global.persistence.UniqueViolations;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
@@ -23,7 +24,10 @@ import java.time.OffsetDateTime;
 @Service
 public class MatchRequestCommandService {
 
-    private static final long MIN_LEAD_HOURS = 3;
+    public static final long MIN_LEAD_HOURS = 3;
+    // 활동 시작 시각의 최대 허용 시점(지금부터 며칠 뒤까지). 서비스 정책 상수이며 등록·수정에 똑같이 적용한다.
+    // 프론트 DatePicker의 maxDate도 같은 값으로 맞춰야 한다.
+    public static final long MAX_LEAD_DAYS = 30;
     private static final long SEARCH_WINDOW_HOURS = 1;
 
     private final MatchRequestRepository matchRequestRepository;
@@ -61,6 +65,12 @@ public class MatchRequestCommandService {
         try {
             matchRequestId = matchRequestRepository.save(matchRequest).getId();
         } catch (DataIntegrityViolationException e) {
+            // 활성 글 유니크 인덱스(uq_match_request_active_user) 위반만 "이미 있음"이다. Spring은 값 범위 초과(22xxx)나
+            // 다른 제약 위반도 같은 예외로 번역하므로, 전부 409로 바꾸면 충돌이 아닌 오류(예: 저장할 수 없는 날짜)까지
+            // "이미 진행 중인 모집글이 있어요"로 잘못 안내한다. 나머지는 그대로 던져 500으로 드러낸다.
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 모집글 또는 신청이 있어요.");
         }
 
@@ -154,10 +164,18 @@ public class MatchRequestCommandService {
     // — 한때 이 값을 24시간보다 크게 고정하는 방식으로 고쳤었으나, 당일 등록·매칭이라는
     // 핵심 시나리오를 막아버려 되돌렸다.)
     private void validateScheduledAt(OffsetDateTime scheduledAt) {
-        OffsetDateTime minAllowed = OffsetDateTime.now(clock).plusHours(MIN_LEAD_HOURS);
-        if (scheduledAt.isBefore(minAllowed)) {
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        if (scheduledAt.isBefore(now.plusHours(MIN_LEAD_HOURS))) {
             throw new InvalidMatchRequestException(
                     "활동 시작 시각은 지금부터 최소 " + MIN_LEAD_HOURS + "시간 이후여야 해요."
+            );
+        }
+        // 최대 허용 시점도 저장 전에 애플리케이션에서 막는다. DB가 저장하지 못하는 범위(연도 999999999 등)가 들어오면
+        // INSERT가 "timestamp out of range"로 실패해 수정은 500이 되고, 등록은 예외를 잘못 변환해 409가 되기 때문이다.
+        // 등록·수정이 같은 검증을 쓰므로 정책(MAX_LEAD_DAYS)은 한 곳에서만 정한다.
+        if (scheduledAt.isAfter(now.plusDays(MAX_LEAD_DAYS))) {
+            throw new InvalidMatchRequestException(
+                    "활동 시작 시각은 지금부터 최대 " + MAX_LEAD_DAYS + "일 이내여야 해요."
             );
         }
     }

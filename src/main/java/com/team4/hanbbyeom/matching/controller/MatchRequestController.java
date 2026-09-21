@@ -36,7 +36,10 @@ public class MatchRequestController {
     // 새로 생성된 게시글 id로의 경로가 담긴다(201 Created).
     @Operation(summary = "모집글 등록",
             description = "코스·거리·페이스·만나는 곳 등 러닝 조건과 일정·대화 수준을 한 번에 등록합니다. " +
-                    "필수 값이 없거나 대화 수준(talkLevel)이 SILENT/LIGHT_CHAT이 아니면 400, " +
+                    "일정(scheduledAt)은 지금부터 " + MatchRequestCommandService.MIN_LEAD_HOURS + "시간 이후 ~ " +
+                    MatchRequestCommandService.MAX_LEAD_DAYS + "일 이내여야 합니다. " +
+                    "필수 값이 없거나, 대화 수준(talkLevel)이 SILENT/LIGHT_CHAT이 아니거나, 일정이 그 범위를 벗어나거나, " +
+                    "만나는 곳이 255자를 넘거나 사용할 수 없는 문자를 포함하면 400, " +
                     "이미 진행 중인 게시글/신청이 있으면 409로 거부됩니다.")
     @PostMapping
     public ResponseEntity<Void> create(
@@ -100,8 +103,9 @@ public class MatchRequestController {
     @Operation(summary = "모집글 수정",
             description = "일정과 대화 수준만 수정합니다. 코스·거리·페이스·만나는 곳은 러닝 조건 수정 API가 담당하며, " +
                     "모집 중(SEARCHING) 상태일 때만 수정할 수 있으며, 이미 신청이 들어왔거나 확정·취소·만료된 글이면 409가 " +
-                    "반환됩니다. 일정(scheduledAt)·대화 수준(talkLevel)이 없거나 대화 수준이 SILENT/LIGHT_CHAT이 아니거나 " +
-                    "일정이 너무 임박하는 등 입력값이 잘못되면 400입니다.")
+                    "반환됩니다. 일정(scheduledAt)은 지금부터 " + MatchRequestCommandService.MIN_LEAD_HOURS + "시간 이후 ~ " +
+                    MatchRequestCommandService.MAX_LEAD_DAYS + "일 이내여야 하며, 일정·대화 수준(talkLevel)이 없거나 " +
+                    "대화 수준이 SILENT/LIGHT_CHAT이 아니거나 일정이 그 범위를 벗어나는 등 입력값이 잘못되면 400입니다.")
     @PatchMapping("/{id}")
     public ResponseEntity<Void> update(
             @PathVariable Long id,
