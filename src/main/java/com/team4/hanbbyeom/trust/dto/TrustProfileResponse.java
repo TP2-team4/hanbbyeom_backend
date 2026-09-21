@@ -1,4 +1,4 @@
-package com.team4.hanbbyeom.matching.dto;
+package com.team4.hanbbyeom.trust.dto;
 
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 

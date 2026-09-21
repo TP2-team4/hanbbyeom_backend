@@ -1,8 +1,8 @@
 package com.team4.hanbbyeom.user.controller;
 
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
-import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
-import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import com.team4.hanbbyeom.trust.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.trust.service.TrustProfileLookupService;
 import com.team4.hanbbyeom.user.dto.UserNicknameResponse;
 import com.team4.hanbbyeom.user.dto.UserNicknameUpdateRequest;
 import com.team4.hanbbyeom.user.dto.UserPreferencesResponse;

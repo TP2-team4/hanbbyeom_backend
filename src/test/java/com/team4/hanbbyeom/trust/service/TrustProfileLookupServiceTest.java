@@ -1,4 +1,4 @@
-package com.team4.hanbbyeom.matching.service;
+package com.team4.hanbbyeom.trust.service;
 
 import com.team4.hanbbyeom.matching.domain.AcceptStatus;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
@@ -6,8 +6,8 @@ import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
-import com.team4.hanbbyeom.matching.dto.RecentReviewResponse;
-import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.trust.dto.RecentReviewResponse;
+import com.team4.hanbbyeom.trust.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;

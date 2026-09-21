@@ -1,8 +1,8 @@
-package com.team4.hanbbyeom.matching.service;
+package com.team4.hanbbyeom.trust.service;
 
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
-import com.team4.hanbbyeom.matching.dto.RecentReviewResponse;
-import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.trust.dto.RecentReviewResponse;
+import com.team4.hanbbyeom.trust.dto.TrustProfileResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
