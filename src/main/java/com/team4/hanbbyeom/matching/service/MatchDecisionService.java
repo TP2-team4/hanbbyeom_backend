@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.matching.repository.*;
+import com.team4.hanbbyeom.trust.repository.TrustProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,7 +27,10 @@ public class MatchDecisionService {
     private final MatchRequestRepository matchRequestRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
+    // matching_mutex 잠금과 users 탈퇴 여부 조회에만 쓴다 — trust_profile 쓰기는 더 이상 여기서 하지 않는다
     private final JdbcTemplate jdbcTemplate;
+    // 완료 활동 수 집계는 trust 도메인(TrustProfileRepository)이 소유한다 (이슈 #94)
+    private final TrustProfileRepository trustProfileRepository;
     // 시각 판단(응답 기한 경과, 활동 종료 여부 등)은 TimeConfig의 Clock 빈을 통해서만 한다 —
     // 테스트에서 시계를 고정할 수 있게 하기 위함 (채팅 도메인과 동일한 방식, #94)
     private final Clock clock;
@@ -38,11 +42,13 @@ public class MatchDecisionService {
                                 ActivityMatchRepository activityMatchRepository,
                                 MatchParticipantRepository matchParticipantRepository,
                                 JdbcTemplate jdbcTemplate,
+                                TrustProfileRepository trustProfileRepository,
                                 Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.trustProfileRepository = trustProfileRepository;
         this.clock = clock;
     }
 
@@ -315,21 +321,8 @@ public class MatchDecisionService {
     // CONFIRMED 상태만 대상으로 하고 end() 뒤에는 ENDED가 되어 다시 대상이 되지 않으며, 두 경로는 matching_mutex로 직렬화된다.
     private void endAndCountCompletion(ActivityMatch activityMatch, MatchParticipant host, MatchParticipant applicant) {
         activityMatch.end();
-        incrementCompletedActivityCount(host.getUserId());
-        incrementCompletedActivityCount(applicant.getUserId());
-    }
-
-    // 후기·노쇼 신고 반영(ActivityFeedbackService)과 같은 upsert 패턴 — trust_profile 행이 없는 사용자도 한 문장으로
-    // 원자적으로 처리해 PK 충돌 없이 행을 만든다. 후기가 없는 새 행의 별점은 NULL이다(V16).
-    // trust_profile은 소유 도메인이 정해지지 않아 매칭 도메인이 임시로 다루고 있으며(V7), 지금까지처럼 JdbcTemplate을 쓴다.
-    private void incrementCompletedActivityCount(Long userId) {
-        jdbcTemplate.update("""
-                INSERT INTO trust_profile (user_id, completed_activity_count)
-                VALUES (?, 1)
-                ON CONFLICT (user_id) DO UPDATE SET
-                    completed_activity_count = trust_profile.completed_activity_count + 1,
-                    updated_at = now()
-                """, userId);
+        trustProfileRepository.incrementCompletedActivityCount(host.getUserId());
+        trustProfileRepository.incrementCompletedActivityCount(applicant.getUserId());
     }
 
     // expireOverdue()/endOverdueActivities()가 공통으로 쓰는 slot(A=호스트/B=신청자) 조회.
