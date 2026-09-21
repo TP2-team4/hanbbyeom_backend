@@ -4,7 +4,7 @@ import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-// 매칭 관련 주기적 정리 작업 2가지를 담당한다.
+// 매칭 관련 주기적 정리 작업 3가지를 담당한다.
 // 로직 자체는 MatchDecisionService에 있고, 이 클래스는 "언제 실행할지"만 담당한다.
 @Component
 public class MatchExpireScheduler {
@@ -29,5 +29,12 @@ public class MatchExpireScheduler {
     @Scheduled(fixedDelay = 60_000)
     public void endOverdueActivities() {
         matchDecisionService.endOverdueActivities();
+    }
+
+    // 모집 기한(search_expires_at)이 지난 모집 중(SEARCHING) 게시글을 자동 만료(EXPIRED) 처리 — 이게 없으면 기한이 지난
+    // 글이 모집 탭에 남고 호스트가 새 글을 올릴 수 없다(이슈 #107). 위 두 작업과 대상이 달라 별도 메서드로 분리했다.
+    @Scheduled(fixedDelay = 60_000)
+    public void expireOverdueRequests() {
+        matchDecisionService.expireOverdueRequests();
     }
 }
