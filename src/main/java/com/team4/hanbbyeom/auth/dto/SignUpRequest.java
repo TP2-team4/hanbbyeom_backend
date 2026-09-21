@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.dto;
 
+import com.team4.hanbbyeom.global.validation.NoNulCharacter;
 import com.team4.hanbbyeom.global.validation.Utf8ByteLength;
 import com.team4.hanbbyeom.user.domain.DefaultTalkLevel;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -35,8 +36,9 @@ public record SignUpRequest(
                 example = "password1234")
         String password,
 
-        @NotBlank
-        @Size(min = 2, max = 16) // 서비스 정책상 좁게 제한, DB(50자)는 향후 정책 변경 대비 여유값이라 DTO보다 넉넉
+        @NotBlank(message = "닉네임을 입력해주세요.")
+        @Size(min = 2, max = 16, message = "닉네임은 2자 이상 16자 이하로 입력해주세요.") // 서비스 정책상 좁게 제한, DB(50자)는 향후 정책 변경 대비 여유값이라 DTO보다 넉넉
+        @NoNulCharacter(message = "닉네임에 사용할 수 없는 문자가 포함되어 있어요.")
         @Schema(description = "서비스에서 표시할 닉네임 (2자 이상 16자 이하)", example = "한뼘러너")
         String nickname,
 

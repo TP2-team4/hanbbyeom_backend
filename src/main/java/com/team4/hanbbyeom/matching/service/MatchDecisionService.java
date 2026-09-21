@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
 import com.team4.hanbbyeom.matching.exception.*;
 import com.team4.hanbbyeom.matching.repository.*;
+import com.team4.hanbbyeom.trust.repository.TrustProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,7 +27,13 @@ public class MatchDecisionService {
     private final MatchRequestRepository matchRequestRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final MatchParticipantRepository matchParticipantRepository;
+    // matching_mutex 잠금과 users 탈퇴 여부 조회에만 쓴다 — trust_profile 쓰기는 더 이상 여기서 하지 않는다
     private final JdbcTemplate jdbcTemplate;
+    // 완료 활동 수 집계는 trust 도메인(TrustProfileRepository)이 소유한다 (이슈 #94)
+    private final TrustProfileRepository trustProfileRepository;
+    // 시각 판단(응답 기한 경과, 활동 종료 여부 등)은 TimeConfig의 Clock 빈을 통해서만 한다 —
+    // 테스트에서 시계를 고정할 수 있게 하기 위함 (채팅 도메인과 동일한 방식, #94)
+    private final Clock clock;
     // 현장 확인 코드 생성용 — 향후 참석 인증 수단으로 쓰일 가능성을 고려해 예측 불가능한
     // SecureRandom을 사용한다(ThreadLocalRandom은 암호학적으로 안전하지 않음).
     private final SecureRandom secureRandom = new SecureRandom();
@@ -33,11 +41,15 @@ public class MatchDecisionService {
     public MatchDecisionService(MatchRequestRepository matchRequestRepository,
                                 ActivityMatchRepository activityMatchRepository,
                                 MatchParticipantRepository matchParticipantRepository,
-                                JdbcTemplate jdbcTemplate) {
+                                JdbcTemplate jdbcTemplate,
+                                TrustProfileRepository trustProfileRepository,
+                                Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.trustProfileRepository = trustProfileRepository;
+        this.clock = clock;
     }
 
     // 호스트가 신청을 수락 - CONFIRMED 전이 + meeting_code 발급 + 양쪽 게시글 MATCHED(신청자는 본인 게시글이 있을 때만)
@@ -170,7 +182,7 @@ public class MatchDecisionService {
         }
 
         ActivityMatchStatus previousStatus = activityMatch.getStatus();
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         // 활동 시작 전이면 모집 중으로 되돌리고, 이미 시작됐으면 닫는다(위 주석 참고)
         MatchRequestStatus requestStatusIfNotEnded = now.isBefore(activityMatch.getScheduledAt())
                 ? MatchRequestStatus.SEARCHING
@@ -189,7 +201,8 @@ public class MatchDecisionService {
                 } else {
                     // 활동 종료 시각은 지났는데 1분 주기 스케줄러(endOverdueActivities())가 아직 처리하기 전인 건.
                     // 이미 끝난 활동을 취소로 바꾸면 안 되므로, 스케줄러가 했을 처리(ENDED + 게시글 CLOSED)를 앞당긴다.
-                    activityMatch.end();
+                    // 완료한 활동 수도 스케줄러가 했을 것과 똑같이 집계한다.
+                    endAndCountCompletion(activityMatch, host.get(), applicant.get());
                     requestStatusAfter = MatchRequestStatus.CLOSED;
                 }
             }
@@ -216,7 +229,7 @@ public class MatchDecisionService {
     public void expireOverdue() {
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         var overdueMatches = activityMatchRepository.findByStatusAndDecisionExpiresAtBefore(
                 ActivityMatchStatus.PROPOSED, now);
 
@@ -252,6 +265,44 @@ public class MatchDecisionService {
         }
     }
 
+    // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 모집 기한(search_expires_at)이 지난 모집 중(SEARCHING)
+    // 게시글을 자동 만료(EXPIRED) 처리한다(이슈 #107). V3에 설계되어 있지만 구현되지 않았던 동작이다:
+    // search_expires_at은 "이 시각이 지나면 스케줄러가 EXPIRED로 전환한다"는 마감 기한인데, 계산해서 저장만 하고
+    // 어디서도 쓰이지 않아 기한이 지난 글이 계속 SEARCHING으로 남았다. 그러면 모집 탭에 계속 노출되고(신청은
+    // apply()의 응답 기한 계산에 걸려 거부된다), 활성 게시글은 사용자당 하나뿐(uq_match_request_active_user)이라
+    // 호스트가 직접 취소하기 전에는 새 글을 올릴 수 없었다. EXPIRED는 그 유니크 인덱스 대상이 아니라 호스트가 풀린다.
+    //
+    // 기준은 scheduled_at이 아니라 search_expires_at(= scheduled_at - 1시간)이다. apply()가 신청을 거부하는 시점
+    // (활동 시작 1시간 전, decisionExpiresAt이 now 이후가 아닐 때)과 같아서, "신청할 수 없는 글은 마감된 글"로 일치한다.
+    // 경계는 포함(search_expires_at <= now)이다.
+    //
+    // 대상은 SEARCHING뿐이다. PENDING_CONFIRMATION은 응답 기한 처리(expireOverdue())가, MATCHED는 종료 처리
+    // (endOverdueActivities())가 담당한다. 신청 대기가 만료돼 SEARCHING으로 복귀한 글도 이미 기한이 지났다면
+    // 다음 실행에서 이 메서드가 정리한다.
+    //
+    // 다른 상태 전이와 같이 matching_mutex 락을 먼저 잡아 신청·취소·수락과 순서를 직렬화한다. 락을 잡은 뒤에
+    // 갱신하므로 이미 커밋된 신청·취소의 결과를 정확히 본다. 한 문장의 일괄 UPDATE라 배포 직후 첫 실행에서 쌓여 있던
+    // 지난 글을 한꺼번에 처리해도 부담이 없고, 여러 번 실행해도 결과가 같다(멱등). 만료된 건수를 반환한다.
+    @Transactional
+    public int expireOverdueRequests() {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        int expiredCount = jdbcTemplate.update(
+                """
+                UPDATE match_request
+                SET status = 'EXPIRED', updated_at = ?
+                WHERE status = 'SEARCHING' AND search_expires_at <= ?
+                """,
+                now, now
+        );
+
+        if (expiredCount > 0) {
+            log.info("모집 기한이 지난 게시글 {}건을 만료(EXPIRED) 처리했습니다.", expiredCount);
+        }
+        return expiredCount;
+    }
+
     // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 확정(CONFIRMED)된 활동 중
     // 예정 종료 시각(scheduled_end_at)이 지난 건들을 ENDED로 자연 종료 처리한다.
     // ⚠️ 이게 없으면 CONFIRMED로 끝난 매칭의 두 참가자는 released_at이 영원히 안 채워져서
@@ -262,7 +313,7 @@ public class MatchDecisionService {
     public void endOverdueActivities() {
         jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         var overdueMatches = activityMatchRepository.findByStatusAndScheduledEndAtBefore(
                 ActivityMatchStatus.CONFIRMED, now);
 
@@ -285,7 +336,7 @@ public class MatchDecisionService {
                 continue;
             }
 
-            activityMatch.end();
+            endAndCountCompletion(activityMatch, host.get(), applicant.get());
 
             // 게시글을 CLOSED로 전이한다 — reject()/expireOverdue()처럼 SEARCHING으로 되돌릴
             // 이유는 없지만(활동이 정상적으로 끝난 것), MATCHED에 그대로 두면 안 된다. MATCHED는
@@ -297,6 +348,19 @@ public class MatchDecisionService {
             applicant.get().release();
             transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.CLOSED);
         }
+    }
+
+    // 활동을 ENDED로 닫고 두 참가자의 "완료한 활동 수"를 올린다(이슈 #96). ActivityMatch.end()를 호출하는 곳은
+    // 스케줄러(endOverdueActivities)와 탈퇴 정리(closeActiveMatchByWithdrawal) 두 곳뿐이라, 완료 집계도 이 메서드
+    // 하나에만 둔다 — 한쪽에서만 집계하면 두 경로의 값이 어긋난다.
+    //
+    // 완료한 활동은 activity_match.status의 ENDED 전이 기준이다. 후기·노쇼 신고 여부와 무관하며, CANCELLED·EXPIRED·
+    // REJECTED는 집계하지 않는다(활동이 실제로 있었던 경우만 센다). 중복 증가는 상태 전이가 막는다: 두 호출 지점 모두
+    // CONFIRMED 상태만 대상으로 하고 end() 뒤에는 ENDED가 되어 다시 대상이 되지 않으며, 두 경로는 matching_mutex로 직렬화된다.
+    private void endAndCountCompletion(ActivityMatch activityMatch, MatchParticipant host, MatchParticipant applicant) {
+        activityMatch.end();
+        trustProfileRepository.incrementCompletedActivityCount(host.getUserId());
+        trustProfileRepository.incrementCompletedActivityCount(applicant.getUserId());
     }
 
     // expireOverdue()/endOverdueActivities()가 공통으로 쓰는 slot(A=호스트/B=신청자) 조회.
@@ -312,7 +376,7 @@ public class MatchDecisionService {
     // 상태만 보고 시각을 안 보면 기한이 지난 매칭도 수락/거절될 수 있었음.
     private void ensureRespondable(ActivityMatch activityMatch) {
         boolean alreadyDecided = activityMatch.getStatus() != ActivityMatchStatus.PROPOSED;
-        boolean deadlinePassed = !OffsetDateTime.now().isBefore(activityMatch.getDecisionExpiresAt());
+        boolean deadlinePassed = !OffsetDateTime.now(clock).isBefore(activityMatch.getDecisionExpiresAt());
         if (alreadyDecided || deadlinePassed) {
             throw new MatchRequestNotSearchingException("이미 응답했거나 종료된 매칭이에요.");
         }

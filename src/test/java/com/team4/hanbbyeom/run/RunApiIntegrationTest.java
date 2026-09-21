@@ -6,6 +6,8 @@ import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
 import com.team4.hanbbyeom.run.dto.RunConditionUpdateRequest;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -54,6 +57,8 @@ public class RunApiIntegrationTest {
     private MatchRequestRepository matchRequestRepository;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private Long ownerUserId;
     private Long otherUserId;
@@ -161,12 +166,12 @@ public class RunApiIntegrationTest {
         mockMvc.perform(get("/api/matching/board")
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(otherUserId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == %d)]", matchRequestId).exists())
-                .andExpect(jsonPath("$[?(@.id == %d)].courseName".formatted(matchRequestId)).value("뚝섬 한강공원"))
-                .andExpect(jsonPath("$[?(@.id == %d)].distanceMinMeters".formatted(matchRequestId)).value(5000))
-                .andExpect(jsonPath("$[?(@.id == %d)].distanceMaxMeters".formatted(matchRequestId)).value(8000))
-                .andExpect(jsonPath("$[?(@.id == %d)].paceMinSec".formatted(matchRequestId)).value(360))
-                .andExpect(jsonPath("$[?(@.id == %d)].paceMaxSec".formatted(matchRequestId)).value(400));
+                .andExpect(jsonPath("$.items[?(@.id == %d)]", matchRequestId).exists())
+                .andExpect(jsonPath("$.items[?(@.id == %d)].courseName".formatted(matchRequestId)).value("뚝섬 한강공원"))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].distanceMinMeters".formatted(matchRequestId)).value(5000))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].distanceMaxMeters".formatted(matchRequestId)).value(8000))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].paceMinSec".formatted(matchRequestId)).value(360))
+                .andExpect(jsonPath("$.items[?(@.id == %d)].paceMaxSec".formatted(matchRequestId)).value(400));
     }
 
     // 3. 경계값 테스트: 거리/페이스가 허용 범위의 정확한 경계값이면 정상 등록되어야 함
@@ -232,5 +237,124 @@ public class RunApiIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("존재하지 않는 러닝 조건이에요. id=999999999"));
+    }
+
+    // 7. 만나는 곳 길이 상한: run_match_condition.meeting_point가 VARCHAR(255)라 256자부터 INSERT/UPDATE가 실패해 500이 된다.
+    // 상한은 바이트가 아니라 문자 수다(Postgres VARCHAR(n) 기준). 한글 255자는 UTF-8로 765바이트지만 저장된다.
+    // 이 클래스는 테스트 트랜잭션 안에서 돌아 INSERT/UPDATE가 flush까지 미뤄지므로, 정상 경계 테스트는 flush로 실제 SQL을 실행한다
+    private int meetingPointLengthInDb() {
+        entityManager.flush();
+        return jdbcTemplate.queryForObject(
+                "SELECT char_length(meeting_point) FROM run_match_condition WHERE match_request_id = ?",
+                Integer.class, matchRequestId);
+    }
+
+    private void registerCondition(String meetingPoint) throws Exception {
+        RunConditionCreateRequest request = new RunConditionCreateRequest(
+                matchRequestId, courseId, meetingPoint, 5000, 8000, 360, 400
+        );
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void 만나는_곳이_255자를_넘으면_등록이_400이다() throws Exception {
+        RunConditionCreateRequest request = new RunConditionCreateRequest(
+                matchRequestId, courseId, "가".repeat(256), 5000, 8000, 360, 400
+        );
+
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳은 255자 이하로 입력해주세요."));
+    }
+
+    @Test
+    void 만나는_곳이_정확히_255자면_등록된다() throws Exception {
+        registerCondition("가".repeat(255));
+
+        assertThat(meetingPointLengthInDb()).isEqualTo(255);
+    }
+
+    @Test
+    void 만나는_곳이_255자를_넘으면_수정이_400이고_조건은_그대로다() throws Exception {
+        registerCondition("뚝섬유원지 3번 출구");
+        RunConditionUpdateRequest request = new RunConditionUpdateRequest(
+                courseId, "가".repeat(256), 3000, 6000, 310, 380
+        );
+
+        mockMvc.perform(patch("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳은 255자 이하로 입력해주세요."));
+
+        entityManager.flush();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT meeting_point FROM run_match_condition WHERE match_request_id = ?",
+                String.class, matchRequestId)).isEqualTo("뚝섬유원지 3번 출구");
+    }
+
+    @Test
+    void 만나는_곳이_정확히_255자면_수정된다() throws Exception {
+        registerCondition("뚝섬유원지 3번 출구");
+        RunConditionUpdateRequest request = new RunConditionUpdateRequest(
+                courseId, "가".repeat(255), 3000, 6000, 310, 380
+        );
+
+        mockMvc.perform(patch("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(meetingPointLengthInDb()).isEqualTo(255);
+    }
+
+    // 8. PostgreSQL은 text/varchar에 NUL(0x00)을 저장하지 못해 DB 단계에서 500이 났다. DTO 검증이 미리 400으로 거절한다.
+    // 통과했다면 이어지는 flush에서 DB 예외로 실패하므로, "DB 저장·수정이 발생하지 않는다"까지 함께 확인된다
+    @Test
+    void 만나는_곳에_NUL_문자가_있으면_등록이_400이고_저장되지_않는다() throws Exception {
+        RunConditionCreateRequest request = new RunConditionCreateRequest(
+                matchRequestId, courseId, "a\0b", 5000, 8000, 360, 400
+        );
+
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        entityManager.flush();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM run_match_condition WHERE match_request_id = ?",
+                Integer.class, matchRequestId)).isZero();
+    }
+
+    @Test
+    void 만나는_곳에_NUL_문자가_있으면_수정이_400이고_조건은_그대로다() throws Exception {
+        registerCondition("뚝섬유원지 3번 출구");
+        RunConditionUpdateRequest request = new RunConditionUpdateRequest(
+                courseId, "여의도\0 2번 출구", 3000, 6000, 310, 380
+        );
+
+        mockMvc.perform(patch("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        entityManager.flush();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT meeting_point FROM run_match_condition WHERE match_request_id = ?",
+                String.class, matchRequestId)).isEqualTo("뚝섬유원지 3번 출구");
     }
 }

@@ -9,19 +9,20 @@ import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
 import com.team4.hanbbyeom.feedback.repository.ActivityReviewRepository;
 import com.team4.hanbbyeom.feedback.repository.NoShowReportRepository;
+import com.team4.hanbbyeom.global.persistence.UniqueViolations;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
-import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.trust.repository.TrustProfileRepository;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -35,20 +36,25 @@ public class ActivityFeedbackService {
     private final MatchParticipantRepository matchParticipantRepository;
     private final ActivityReviewRepository activityReviewRepository;
     private final NoShowReportRepository noShowReportRepository;
-    // trust_profile은 JPA 엔티티가 없고(매칭 도메인이 임시로 만든 테이블) 지금까지 계속
-    // JdbcTemplate으로 직접 SQL을 다뤄왔으므로(TrustProfileLookupService 참고) 동일하게 사용
-    private final JdbcTemplate jdbcTemplate;
+    // trust_profile 쓰기는 trust 도메인(TrustProfileRepository)이 소유한다 — 후기/노쇼 반영 SQL은
+    // 거기 있고, 여기서는 "무엇을 반영할지"만 호출한다 (이슈 #94)
+    private final TrustProfileRepository trustProfileRepository;
+    // "활동이 끝났는지" 판정은 TimeConfig의 Clock 빈으로만 한다 — 경계 시각(now == scheduledEndAt)
+    // 테스트를 시계 고정으로 쓸 수 있게 하기 위함 (채팅 도메인과 동일한 방식, #94)
+    private final Clock clock;
 
     public ActivityFeedbackService(ActivityMatchRepository activityMatchRepository,
                                    MatchParticipantRepository matchParticipantRepository,
                                    ActivityReviewRepository activityReviewRepository,
                                    NoShowReportRepository noShowReportRepository,
-                                   JdbcTemplate jdbcTemplate) {
+                                   TrustProfileRepository trustProfileRepository,
+                                   Clock clock) {
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.activityReviewRepository = activityReviewRepository;
         this.noShowReportRepository = noShowReportRepository;
-        this.jdbcTemplate = jdbcTemplate;
+        this.trustProfileRepository = trustProfileRepository;
+        this.clock = clock;
     }
 
     // 활동 후기 작성.
@@ -80,10 +86,16 @@ public class ActivityFeedbackService {
                     request.rating(), request.perceivedTalkLevel(), request.comment()
             ));
         } catch (DataIntegrityViolationException e) {
+            // uq_activity_review_once 유니크 위반(SQLState 23505)만 "이미 제출함"이다. Spring은 값이 너무 길거나(22001)
+            // 잘못된 바이트(22021, NUL 등) 같은 데이터 오류와 다른 제약 위반도 같은 예외로 번역하므로, 전부 409로 바꾸면
+            // 실제 원인이 "이미 제출했어요"로 가려진다. 그 밖의 오류는 그대로 던져 500으로 드러낸다.
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 
-        applyReviewToTrustProfile(revieweeId, request.rating(), request.perceivedTalkLevel());
+        trustProfileRepository.applyReview(revieweeId, request.rating(), request.perceivedTalkLevel());
     }
 
     // 노쇼 신고 접수. submitReview()와 구조는 거의 동일하고, 저장하는 엔티티와
@@ -104,10 +116,14 @@ public class ActivityFeedbackService {
                     request.reason(), request.detail()
             ));
         } catch (DataIntegrityViolationException e) {
+            // uq_no_show_report_once 유니크 위반(23505)만 409로 바꾼다(submitReview()와 같은 이유)
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 
-        incrementNoShowCount(reportedId);
+        trustProfileRepository.incrementNoShowReportCount(reportedId);
     }
 
     // "지금 이 활동에 대해 후기/신고를 낼 수 있는지" 프론트가 미리 물어보는 용도.
@@ -132,7 +148,7 @@ public class ActivityFeedbackService {
 
         boolean wasConfirmed = activityMatch.getStatus() == ActivityMatchStatus.CONFIRMED
                 || activityMatch.getStatus() == ActivityMatchStatus.ENDED;
-        boolean activityEnded = !OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt());
+        boolean activityEnded = !OffsetDateTime.now(clock).isBefore(activityMatch.getScheduledEndAt());
 
         boolean canSubmit = wasConfirmed && activityEnded && !alreadySubmitted;
 
@@ -170,7 +186,7 @@ public class ActivityFeedbackService {
             throw new NotMatchParticipantException("본인이 참여한 매칭만 가능해요.");
         }
 
-        if (OffsetDateTime.now().isBefore(activityMatch.getScheduledEndAt())) {
+        if (OffsetDateTime.now(clock).isBefore(activityMatch.getScheduledEndAt())) {
             throw new FeedbackNotAllowedException("아직 활동이 끝나지 않았어요.");
         }
 
@@ -180,67 +196,5 @@ public class ActivityFeedbackService {
                 .findFirst()
                 .map(MatchParticipant::getUserId)
                 .orElseThrow(() -> new NotMatchParticipantException("상대방 정보를 찾을 수 없어요."));
-    }
-
-    // 후기 등록 결과를 trust_profile에 반영.
-    // 평균 별점은 "기존 평균 * 기존 개수 + 새 별점"을 "개수+1"로 나눠서 새 평균을 구하는
-    // 일반적인 누적 평균 공식이다. 대화 수준은 SILENT/LIGHT_CHAT 중 어느 쪽 vote 컬럼을
-    // 올릴지가 갈려서, 동적으로 컬럼명을 만들지 않고 두 SQL을 그냥 분기해서 각각 명시했다
-    // (SQL 인젝션 걱정 없이 가장 단순하고 안전한 방법).
-    //
-    // UPDATE 후 0행이면 INSERT하는 방식 대신 단일 INSERT ... ON CONFLICT DO UPDATE(upsert)를 쓴다.
-    // user_id가 trust_profile의 PK라 ON CONFLICT (user_id)가 그대로 성립하고, 이 한 문장이
-    // 원자적으로 처리되므로 "trust_profile 행이 없는 같은 사용자에게 서로 다른 두 매칭에서
-    // 거의 동시에 후기가 들어오는" 경우에도 PK 충돌(UPDATE 0행 → 두 트랜잭션 모두 INSERT 시도)이
-    // 생기지 않는다 (PR #83 리뷰로 발견된 레이스).
-    //
-    // completed_activity_count는 일부러 안 건드린다 — "상대가 후기를 써줄 때만 오른다"는
-    // 지금 정의로 값을 쌓기 시작하면, 후기 작성률이 100%가 아닌 이상 구조적으로 실제보다
-    // 적게 집계되고, 이미 모집 탭 목록/호스트·신청자 프로필/마이페이지 세 곳에 노출되는 값이라
-    // 나중에 "활동 종료 시점 기준"으로 재정의할 때 과거 데이터 소급 보정이 필요해진다.
-    // 정의가 확정되기 전까지는 컬럼 기본값 0(= "아직 미구현")으로 남겨둔다 (후속 이슈, PR #83 리뷰).
-    private void applyReviewToTrustProfile(Long userId, Integer rating, TalkLevel talkLevel) {
-        boolean isSilent = talkLevel == TalkLevel.SILENT;
-
-        if (isSilent) {
-            jdbcTemplate.update("""
-                INSERT INTO trust_profile
-                    (user_id, average_rating, review_count, review_silent_vote_count)
-                VALUES (?, ?, 1, 1)
-                ON CONFLICT (user_id) DO UPDATE SET
-                    average_rating = ROUND(
-                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
-                        / (trust_profile.review_count + 1), 1),
-                    review_count = trust_profile.review_count + 1,
-                    review_silent_vote_count = trust_profile.review_silent_vote_count + 1,
-                    updated_at = now()
-                """, userId, rating);
-        } else {
-            jdbcTemplate.update("""
-                INSERT INTO trust_profile
-                    (user_id, average_rating, review_count, review_light_chat_vote_count)
-                VALUES (?, ?, 1, 1)
-                ON CONFLICT (user_id) DO UPDATE SET
-                    average_rating = ROUND(
-                        (trust_profile.average_rating * trust_profile.review_count + EXCLUDED.average_rating)
-                        / (trust_profile.review_count + 1), 1),
-                    review_count = trust_profile.review_count + 1,
-                    review_light_chat_vote_count = trust_profile.review_light_chat_vote_count + 1,
-                    updated_at = now()
-                """, userId, rating);
-        }
-    }
-
-    // 노쇼 신고 결과를 trust_profile에 반영 — completed_activity_count는 올리지 않는다
-    // (실제로 못 만났다는 신고니까 "완료한 활동"으로 칠 수 없음).
-    // applyReviewToTrustProfile()과 동일한 이유로 upsert 사용.
-    private void incrementNoShowCount(Long userId) {
-        jdbcTemplate.update("""
-            INSERT INTO trust_profile (user_id, no_show_report_count)
-            VALUES (?, 1)
-            ON CONFLICT (user_id) DO UPDATE SET
-                no_show_report_count = trust_profile.no_show_report_count + 1,
-                updated_at = now()
-            """, userId);
     }
 }

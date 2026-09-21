@@ -131,9 +131,24 @@ public class ActivityMatch {
     // closedByUserId는 남기지 않는다(expire()와 동일). confirmedAt/meetingCode는 그대로 둔다 —
     // 채팅이 confirmedAt으로 "한 번이라도 확정된 매칭인지"를 판단해 과거 대화 조회를 유지하기 때문이다.
     // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다(end()와 동일한 이유).
+    //
+    // ⚠️ 계약: CANCELLED로 만드는 경로는 둘이고, closedByUserId로 구분한다. 활동 이력 API(GET /api/matching/matches)가
+    // closed_by_user_id로 취소 주체(cancelledBy: ME/COUNTERPART/SYSTEM)를 나누기 때문이다.
+    //   - 회원 탈퇴로 인한 시스템 처리(이 메서드): closedByUserId=NULL
+    //   - 참가자가 직접 취소(cancelByParticipant()): closedByUserId=취소한 사용자 id — 새 취소 경로를 만들면 이 값을 남겨야 한다
     public void cancelByWithdrawal() {
         this.status = ActivityMatchStatus.CANCELLED;
         this.closedAt = OffsetDateTime.now();
+    }
+
+    // 확정(CONFIRMED)된 활동을 참가자가 직접 취소했을 때 호출한다(이슈 #109). 결과 상태는 cancelByWithdrawal()과 같지만
+    // 시스템이 아니라 사용자의 행동이므로 closedByUserId에 취소한 사용자를 남긴다. confirmedAt/meetingCode는 그대로 둔다 —
+    // 채팅이 confirmedAt으로 "한 번이라도 확정된 매칭인지"를 판단해 과거 대화 조회를 유지하기 때문이다.
+    // 이 호출 이후에 참가자 release()까지 반드시 같이 해줘야 한다(end()와 동일한 이유).
+    public void cancelByParticipant(Long cancelledByUserId) {
+        this.status = ActivityMatchStatus.CANCELLED;
+        this.closedAt = OffsetDateTime.now();
+        this.closedByUserId = cancelledByUserId;
     }
 
     // 확정(CONFIRMED)된 활동이 예정 종료 시각(scheduled_end_at)을 지나 자연 종료됐을 때 호출.

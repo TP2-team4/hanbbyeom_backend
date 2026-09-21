@@ -55,7 +55,9 @@ public class RunConditionController {
         return runConditionService.getById(principal.getUserId(), id);
     }
 
-    @Operation(summary = "러닝 조건 수정")
+    @Operation(summary = "러닝 조건 수정",
+            description = "모집 중(SEARCHING) 상태의 글만 수정할 수 있으며, 아니면 409가 반환됩니다. " +
+                    "거리·페이스 범위를 벗어나는 등 입력값이 잘못되면 400입니다.")
     @PatchMapping("/{id}")
     public ResponseEntity<Void> update(
             @PathVariable Long id,
@@ -68,7 +70,8 @@ public class RunConditionController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "러닝 조건 삭제 (매칭 취소)")
+    @Operation(summary = "러닝 조건 삭제 (매칭 취소)",
+            description = "조건을 삭제하고 모집글을 취소(CANCELLED)합니다. 모집 중(SEARCHING) 상태의 글만 가능하며, 아니면 409가 반환됩니다.")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
             @PathVariable Long id,

@@ -1,36 +1,49 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.global.persistence.UniqueViolations;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
-import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
 import com.team4.hanbbyeom.run.service.RunConditionService;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 
 @Service
 public class MatchRequestCommandService {
 
-    private static final long MIN_LEAD_HOURS = 3;
+    public static final long MIN_LEAD_HOURS = 3;
+    // 활동 시작 시각의 최대 허용 시점(지금부터 며칠 뒤까지). 서비스 정책 상수이며 등록·수정에 똑같이 적용한다.
+    // 프론트 DatePicker의 maxDate도 같은 값으로 맞춰야 한다.
+    public static final long MAX_LEAD_DAYS = 30;
     private static final long SEARCH_WINDOW_HOURS = 1;
 
     private final MatchRequestRepository matchRequestRepository;
     private final RunConditionService runConditionService; // 새로 주입
+    private final JdbcTemplate jdbcTemplate; // 취소 시 matching_mutex 락을 잡기 위해 사용
+    // 등록 최소 리드타임 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    private final Clock clock;
 
     public MatchRequestCommandService(MatchRequestRepository matchRequestRepository,
-                                      RunConditionService runConditionService) {
+                                      RunConditionService runConditionService,
+                                      JdbcTemplate jdbcTemplate,
+                                      Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.runConditionService = runConditionService;
+        this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 모집글(match_request)을 SEARCHING 상태로 새로 만들고, 같은 트랜잭션 안에서 러닝 조건까지
@@ -44,7 +57,7 @@ public class MatchRequestCommandService {
         MatchRequest matchRequest = new MatchRequest(
                 userId,
                 request.scheduledAt(),
-                TalkLevel.valueOf(request.talkLevel()),
+                request.talkLevel(),
                 searchExpiresAt
         );
 
@@ -52,6 +65,12 @@ public class MatchRequestCommandService {
         try {
             matchRequestId = matchRequestRepository.save(matchRequest).getId();
         } catch (DataIntegrityViolationException e) {
+            // 활성 글 유니크 인덱스(uq_match_request_active_user) 위반만 "이미 있음"이다. Spring은 값 범위 초과(22xxx)나
+            // 다른 제약 위반도 같은 예외로 번역하므로, 전부 409로 바꾸면 충돌이 아닌 오류(예: 저장할 수 없는 날짜)까지
+            // "이미 진행 중인 모집글이 있어요"로 잘못 안내한다. 나머지는 그대로 던져 500으로 드러낸다.
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 모집글 또는 신청이 있어요.");
         }
 
@@ -74,22 +93,56 @@ public class MatchRequestCommandService {
 
     // 일정(scheduledAt)·대화 수준만 수정한다 — 코스/거리/페이스/만나는 곳은 RunConditionService
     // (팀원 B) 담당이라 여기서 다루지 않는다. 상태 전이는 없고(SEARCHING 유지), SEARCHING이
-    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 IllegalStateException을 던진다.
+    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 MatchRequestNotSearchingException(409)을 던진다
+    // (취소·러닝 조건 삭제와 같은 "지금 상태에서는 불가능"이라는 거절이라 400이 아니라 409다).
+    //
+    // 신청·수락·거절·취소·탈퇴 정리와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 이 메서드가 게시글을 읽은 뒤
+    // apply()가 게시글을 PENDING_CONFIRMATION으로 바꿔 커밋했을 때, 낡은 SEARCHING으로 상태 검사를 통과하고 커밋 시점에
+    // 게시글의 모든 컬럼을 UPDATE(엔티티에 @DynamicUpdate/@Version이 없다)해 status를 SEARCHING으로 되돌린다. 그러면
+    // 신청이 걸린 PROPOSED 매칭이 살아 있는데 게시글은 모집 중으로 보이고, 다음 신청은 호스트의 활성 참가
+    // (uq_participant_active_user)에 걸려 실패한다. 락을 잡은 뒤에 읽으므로 이미 커밋된 신청·취소의 결과를 정확히 본다.
     @Transactional
     public void update(Long userId, Long matchRequestId, MatchRequestUpdateRequest request) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "수정");
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);
-        matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
+        matchRequest.changeConditions(request.scheduledAt(), request.talkLevel(), searchExpiresAt);
     }
 
-    // 게시글을 CANCELLED로 전이시켜 모집 탭에서 내린다. 주의: 현재 상태를 검사하지 않으므로
-    // 이미 신청이 걸려 PENDING_CONFIRMATION인 글도 그대로 취소 가능하다 — 이 경우 이미 생성된
-    // activity_match/match_participant 쪽은 여기서 정리하지 않으니 별도 확인이 필요하다.
+    // 게시글을 CANCELLED로 전이시켜 모집 탭에서 내린다. 모집 중(SEARCHING)인 게시글만 취소할 수 있다(이슈 #100).
+    //
+    // 예전에는 상태를 검사하지 않아, 이미 신청이 걸린 PENDING_CONFIRMATION이나 확정된 MATCHED 게시글도 취소됐다.
+    // 그러면 게시글만 CANCELLED가 되고 activity_match/match_participant는 정리되지 않아 두 가지가 어긋났다.
+    //  - 신청 대기 중 취소: 응답 기한이 지나 expireOverdue()가 돌면 취소한 게시글이 SEARCHING으로 되살아난다
+    //  - 확정 후 취소: 활동과 참가자가 그대로 남아 상대가 묶이고, 종료되면 취소한 활동이 완료로 집계된다
+    // 이미 신청이 걸렸다면 호스트가 먼저 신청을 거절(MatchDecisionService.reject)해 게시글이 SEARCHING으로 돌아온 뒤에
+    // 취소해야 한다. 확정된 매칭을 사용자가 직접 취소하는 기능은 아직 없다(제품 결정이 필요해 별도 이슈).
+    //
+    // 신청·수락·거절·만료·탈퇴 정리와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 apply()가 게시글을
+    // PENDING_CONFIRMATION으로 바꾸는 것과 동시에 들어온 취소가 둘 다 SEARCHING으로 읽고 통과해, 상태 검사가 있어도
+    // 같은 불일치가 남는다. 락을 잡은 뒤에 게시글을 읽으므로 이미 커밋된 신청의 결과를 정확히 본다.
+    // 소유권 검증(404/403)을 상태 검사보다 앞에 둔다 — 본인 게시글이 아닌 사용자가 상태를 알아내지 못하게 하기 위함.
     @Transactional
     public void cancel(Long userId, Long matchRequestId) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "내리");
+        if (matchRequest.getStatus() != MatchRequestStatus.SEARCHING) {
+            throw new MatchRequestNotSearchingException(notCancellableMessage(matchRequest.getStatus()));
+        }
         matchRequest.changeStatus(MatchRequestStatus.CANCELLED);
+    }
+
+    // 취소할 수 없는 상태별로 호스트가 다음에 무엇을 해야 하는지 알려준다.
+    private String notCancellableMessage(MatchRequestStatus status) {
+        return switch (status) {
+            case PENDING_CONFIRMATION -> "신청이 진행 중인 모집글이에요. 신청을 먼저 거절한 뒤 취소해주세요.";
+            case MATCHED -> "이미 확정된 매칭이 있는 모집글은 취소할 수 없어요.";
+            // CANCELLED/EXPIRED/CLOSED. SEARCHING은 취소 가능하므로 여기 오지 않는다.
+            default -> "이미 마감되었거나 취소된 모집글이에요.";
+        };
     }
 
     // update()/cancel() 공용 — 게시글을 찾아 존재 여부(404)와 소유권(403)을 함께 검증한다.
@@ -111,10 +164,18 @@ public class MatchRequestCommandService {
     // — 한때 이 값을 24시간보다 크게 고정하는 방식으로 고쳤었으나, 당일 등록·매칭이라는
     // 핵심 시나리오를 막아버려 되돌렸다.)
     private void validateScheduledAt(OffsetDateTime scheduledAt) {
-        OffsetDateTime minAllowed = OffsetDateTime.now().plusHours(MIN_LEAD_HOURS);
-        if (scheduledAt.isBefore(minAllowed)) {
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        if (scheduledAt.isBefore(now.plusHours(MIN_LEAD_HOURS))) {
             throw new InvalidMatchRequestException(
                     "활동 시작 시각은 지금부터 최소 " + MIN_LEAD_HOURS + "시간 이후여야 해요."
+            );
+        }
+        // 최대 허용 시점도 저장 전에 애플리케이션에서 막는다. DB가 저장하지 못하는 범위(연도 999999999 등)가 들어오면
+        // INSERT가 "timestamp out of range"로 실패해 수정은 500이 되고, 등록은 예외를 잘못 변환해 409가 되기 때문이다.
+        // 등록·수정이 같은 검증을 쓰므로 정책(MAX_LEAD_DAYS)은 한 곳에서만 정한다.
+        if (scheduledAt.isAfter(now.plusDays(MAX_LEAD_DAYS))) {
+            throw new InvalidMatchRequestException(
+                    "활동 시작 시각은 지금부터 최대 " + MAX_LEAD_DAYS + "일 이내여야 해요."
             );
         }
     }

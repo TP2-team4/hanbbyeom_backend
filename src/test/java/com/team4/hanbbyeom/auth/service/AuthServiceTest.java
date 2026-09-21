@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.service;
 
+import com.team4.hanbbyeom.auth.exception.DuplicateEmailException;
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.dto.LoginRequest;
@@ -131,7 +132,7 @@ class AuthServiceTest {
 
         // 지정한 Exception이 발생해야 테스트 성공
         assertThrows(
-                IllegalStateException.class,
+                DuplicateEmailException.class,
                 () -> authService.signUp(
                         new SignUpRequest(
                                 email,

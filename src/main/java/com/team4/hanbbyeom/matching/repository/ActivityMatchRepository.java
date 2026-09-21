@@ -44,6 +44,9 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
     // run_match_condition/running_course를 다시 조인할 필요가 없다 — 호스트 닉네임·신뢰도만
     // slot='A' 참가자를 거쳐 조인한다. 상태(PENDING/ACCEPTED/REJECTED/CANCELLED) 매핑과 상태
     // 필터링은 Service(MatchApplyService)가 closedByUserId까지 보고 판단한다.
+    // 호스트의 노쇼횟수·최근후기는 모집 탭 목록(MatchRequestRepository.BOARD_BASE, searchBoard*)과 같은 방식으로
+    // 조인한다 — 세 화면(목록/상세/내 신청 내역)이 같은 AuthorSummary를 쓰는데 이 화면만 비어
+    // 보이는 불일치를 막기 위함 (이슈 #70).
     @Query(value = """
         SELECT am.id AS id,
                am.status AS status,
@@ -56,12 +59,22 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
                host.match_request_id AS hostMatchRequestId,
                u.nickname AS hostNickname,
                tp.average_rating AS hostRating,
-               tp.completed_activity_count AS hostCompletedCount
+               COALESCE(tp.completed_activity_count, 0) AS hostCompletedCount,
+               COALESCE(tp.no_show_report_count, 0) AS hostNoShowCount,
+               latest_review.comment AS latestReviewComment,
+               latest_review.created_at AS latestReviewCreatedAt
         FROM match_participant applicant
         JOIN activity_match am ON am.id = applicant.activity_match_id
         JOIN match_participant host ON host.activity_match_id = am.id AND host.slot = 'A'
         JOIN users u ON u.id = host.user_id
         LEFT JOIN trust_profile tp ON tp.user_id = host.user_id
+        LEFT JOIN LATERAL (
+            SELECT ar.comment, ar.created_at
+            FROM activity_review ar
+            WHERE ar.reviewee_user_id = host.user_id
+            ORDER BY ar.created_at DESC, ar.id DESC
+            LIMIT 1
+        ) latest_review ON true
         WHERE applicant.slot = 'B' AND applicant.user_id = :applicantUserId
         ORDER BY am.created_at DESC
         """, nativeQuery = true)
@@ -82,5 +95,62 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
         String getHostNickname();
         Double getHostRating();
         Integer getHostCompletedCount();
+        Integer getHostNoShowCount();
+        String getLatestReviewComment();
+        Instant getLatestReviewCreatedAt();
+    }
+
+    // 내 활동 이력 목록(GET /api/matching/matches)용 조회. 채팅 목록(ChatMessageRepository.findChatListByUserId)과
+    // 같이 "내가 참가자이면서 한 번이라도 확정된(confirmed_at IS NOT NULL) 매칭"만 대상으로 한다 —
+    // released_at 조건을 쓰지 않아 끝난 매칭도 남기고, 신청 대기·거절·만료처럼 확정된 적 없는 매칭은 제외된다.
+    // 확정 후 취소된 매칭(CANCELLED)은 confirmed_at이 유지되므로 이력에 포함된다.
+    //
+    // 후기·노쇼 신고 제출 여부는 EXISTS 서브쿼리로 한 번에 가져온다(활동마다 따로 조회하는 N+1 방지).
+    // 후기와 신고는 활동당 하나만 낼 수 있어(ActivityFeedbackService 규칙) 두 CASE가 겹치는 일은 없다.
+    // 상대 닉네임은 users에서 가져오며, 상대가 탈퇴했다면 NULL이 된다(참가 행은 그대로 남으므로 항목은 유지).
+    // 정렬은 활동 시작 시각 최신순(id는 같은 시각의 순서를 고정하는 용도).
+    @Query(value = """
+        SELECT am.id AS activityMatchId,
+               am.course_name AS courseName,
+               am.distance_min_meters AS distanceMinMeters,
+               am.distance_max_meters AS distanceMaxMeters,
+               am.scheduled_at AS scheduledAt,
+               am.scheduled_end_at AS scheduledEndAt,
+               am.status AS status,
+               am.closed_by_user_id AS closedByUserId,
+               u.nickname AS counterpartNickname,
+               CASE
+                   WHEN EXISTS (SELECT 1 FROM activity_review r
+                                WHERE r.activity_match_id = am.id AND r.reviewer_user_id = :userId)
+                       THEN 'REVIEW'
+                   WHEN EXISTS (SELECT 1 FROM no_show_report n
+                                WHERE n.activity_match_id = am.id AND n.reporter_user_id = :userId)
+                       THEN 'NO_SHOW_REPORT'
+                   ELSE NULL
+               END AS submittedFeedbackType
+        FROM match_participant mine
+        JOIN activity_match am ON am.id = mine.activity_match_id
+        JOIN match_participant other
+          ON other.activity_match_id = am.id
+         AND other.user_id <> :userId
+        JOIN users u ON u.id = other.user_id
+        WHERE mine.user_id = :userId
+          AND am.confirmed_at IS NOT NULL
+        ORDER BY am.scheduled_at DESC, am.id DESC
+        """, nativeQuery = true)
+    List<MyActivityRow> findMyActivities(@Param("userId") Long userId);
+
+    // findMyActivities() 결과 한 행을 매핑하는 프로젝션 — SELECT의 `AS 별칭`과 getter 이름이 대응한다.
+    interface MyActivityRow {
+        Long getActivityMatchId();
+        String getCourseName();
+        Integer getDistanceMinMeters();
+        Integer getDistanceMaxMeters();
+        Instant getScheduledAt();
+        Instant getScheduledEndAt();
+        String getStatus();
+        Long getClosedByUserId();
+        String getCounterpartNickname();
+        String getSubmittedFeedbackType();
     }
 }

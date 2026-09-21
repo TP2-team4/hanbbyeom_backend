@@ -1,10 +1,13 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
+import com.team4.hanbbyeom.matching.dto.BoardSort;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MatchBoardPageResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
@@ -30,38 +33,64 @@ public class MatchRequestBoardService {
     private static final List<MatchRequestStatus> ACTIVE_STATUSES =
             List.of(MatchRequestStatus.SEARCHING, MatchRequestStatus.PENDING_CONFIRMATION, MatchRequestStatus.MATCHED);
 
+    // 모집 탭 목록 한 페이지 크기 한도 (이슈 #103). 컨트롤러 기본값은 20.
+    public static final int BOARD_MAX_PAGE_SIZE = 50;
+
     private final MatchRequestRepository matchRequestRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final ActivityMatchRepository activityMatchRepository;
     private final JdbcTemplate jdbcTemplate;
+    // "오늘/내일/이번 주말" 날짜 프리셋 계산은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
+    private final Clock clock;
 
     public MatchRequestBoardService(MatchRequestRepository matchRequestRepository,
                                     MatchParticipantRepository matchParticipantRepository,
                                     ActivityMatchRepository activityMatchRepository,
-                                    JdbcTemplate jdbcTemplate) {
+                                    JdbcTemplate jdbcTemplate,
+                                    Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.activityMatchRepository = activityMatchRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.clock = clock;
     }
 
     // 모집 탭 목록 조회 — 읽기 전용이라 상태 전이는 없다. 필터는 전부 선택적(null 허용)이며,
     // 거리/페이스는 값이 정확히 일치하는 게 아니라 "게시글의 범위와 필터 범위가 겹치는지"로
-    // 판단한다(MatchRequestRepository.searchBoard 참고). currentUserId로 본인 글은 항상 제외된다.
-    public List<MatchBoardItemResponse> getBoard(String region, String talkLevel,
-                                                 Integer minDistance, Integer maxDistance,
-                                                 Integer minPace, Integer maxPace,
-                                                 String datePreset, Long currentUserId) {
+    // 판단한다(MatchRequestRepository.BOARD_BASE 참고). currentUserId로 본인 글은 항상 제외된다.
+    // 커서 페이징(이슈 #103): cursor는 직전 페이지 마지막 글의 id(첫 페이지면 null), size는 1~50.
+    // size+1건을 조회해서 다음 페이지 존재 여부를 판단한다(MatchBoardPageResponse.of 참고).
+    // 정렬(이슈 #123): sort에 따라 정렬 키와 커서 비교 조건이 다른 쿼리를 고른다 — cursor는 같은 sort에서만 유효.
+    public MatchBoardPageResponse getBoard(String region, String talkLevel,
+                                           Integer minDistance, Integer maxDistance,
+                                           Integer minPace, Integer maxPace,
+                                           String datePreset, Long currentUserId,
+                                           Long cursor, int size, BoardSort sort) {
+        // 잘못된 값은 IllegalArgumentException → GlobalExceptionHandler가 400으로 응답 (채팅의 afterId 검증과 같은 방식)
+        if (size < 1 || size > BOARD_MAX_PAGE_SIZE) {
+            throw new InvalidRequestValueException("size는 1 이상 " + BOARD_MAX_PAGE_SIZE + " 이하여야 합니다.");
+        }
+        // cursor 존재 여부는 따로 검증하지 않는다 — 존재하지 않는 id면 쿼리의 행 비교가 NULL이 돼서 빈 페이지
+        // (items=[], hasNext=false)가 나오고, 프론트는 hasNext=false에서 멈추므로 해가 없다. 검증하려면 페이지마다
+        // 쿼리가 한 번 더 나가는데, cursor는 항상 직전 응답의 nextCursor라 정상 흐름에선 잘못될 일이 없다.
 
         OffsetDateTime[] range = resolveDateRange(datePreset);
 
-        List<MatchRequestRepository.MatchBoardRow> rows = matchRequestRepository.searchBoard(
-                region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId
-        );
+        List<MatchRequestRepository.MatchBoardRow> rows = switch (sort) {
+            case LATEST -> matchRequestRepository.searchBoardLatest(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+            case SCHEDULED -> matchRequestRepository.searchBoardByScheduled(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+            case DISTANCE -> matchRequestRepository.searchBoardByDistance(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+        };
 
-        Map<Long, String> nicknameByUserId = fetchNicknames(rows.stream().map(MatchRequestRepository.MatchBoardRow::getUserId).toList());
-
-        return rows.stream()
+        // 작성자 닉네임은 목록 쿼리가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
+        // (예전엔 fetchNicknames()를 한 번 더 호출해 결과를 버리고 있었다 — 목록 조회마다 DB 왕복 1회 낭비)
+        List<MatchBoardItemResponse> fetched = rows.stream()
                 .map(row -> new MatchBoardItemResponse(
                         row.getId(),
                         row.getCourseName(),
@@ -74,10 +103,14 @@ public class MatchRequestBoardService {
                         new MatchBoardItemResponse.AuthorSummary(
                                 row.getAuthorNickname(),
                                 row.getAuthorRating(),
-                                row.getAuthorCompletedCount()
+                                row.getAuthorCompletedCount(),
+                                row.getAuthorNoShowCount(),
+                                MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                        row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
                         )
                 ))
                 .collect(Collectors.toList());
+        return MatchBoardPageResponse.of(fetched, size);
     }
 
     // "오늘"/"내일"/"이번 주말" 같은 프리셋을 실제 날짜 범위로 변환. WEEKEND는 이번 주 토요일이
@@ -88,7 +121,10 @@ public class MatchRequestBoardService {
             return new OffsetDateTime[]{null, null};
         }
         ZoneId zone = ZoneId.of("Asia/Seoul");
-        LocalDate today = LocalDate.now(zone);
+        // clock은 UTC 기준이라(TimeConfig 참고) 서울 기준 "오늘"은 instant에 zone을 입혀서 구한다.
+        // clock.withZone(zone) 대신 instant()만 쓰는 이유: 테스트에서 Clock을 Mockito 목으로 바꾸고
+        // instant()/getZone()만 스텁하는 패턴(ChatMessageIntegrationTest)에서 withZone()은 null을 돌려준다.
+        LocalDate today = LocalDate.ofInstant(clock.instant(), zone);
 
         LocalDate from;
         LocalDate to;
@@ -101,7 +137,7 @@ public class MatchRequestBoardService {
                 from = saturday;
                 to = saturday.plusDays(2); // 토요일 00:00 ~ 월요일 00:00 (토+일 포함)
             }
-            default -> throw new IllegalArgumentException("알 수 없는 datePreset: " + datePreset);
+            default -> throw new InvalidRequestValueException("알 수 없는 datePreset: " + datePreset);
         }
         return new OffsetDateTime[]{
                 from.atStartOfDay(zone).toOffsetDateTime(),
@@ -148,7 +184,16 @@ public class MatchRequestBoardService {
                 row.getStatus(),
                 row.getUserId().equals(currentUserId),
                 pendingApplicantCount,
-                new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
+                // 목록(getBoard)과 같은 값을 내려준다 — 이전엔 (nickname, null, null)로 하드코딩돼 있어
+                // 상세 화면에서만 평점/완료횟수가 항상 비어 보이던 버그 (이슈 #70)
+                new MatchBoardItemResponse.AuthorSummary(
+                        nickname,
+                        row.getAuthorRating(),
+                        row.getAuthorCompletedCount(),
+                        row.getAuthorNoShowCount(),
+                        MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                )
         );
     }
 

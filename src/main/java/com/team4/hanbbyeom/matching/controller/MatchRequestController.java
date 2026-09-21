@@ -7,6 +7,7 @@ import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -35,10 +36,14 @@ public class MatchRequestController {
     // 새로 생성된 게시글 id로의 경로가 담긴다(201 Created).
     @Operation(summary = "모집글 등록",
             description = "코스·거리·페이스·만나는 곳 등 러닝 조건과 일정·대화 수준을 한 번에 등록합니다. " +
+                    "일정(scheduledAt)은 지금부터 " + MatchRequestCommandService.MIN_LEAD_HOURS + "시간 이후 ~ " +
+                    MatchRequestCommandService.MAX_LEAD_DAYS + "일 이내여야 합니다. " +
+                    "필수 값이 없거나, 대화 수준(talkLevel)이 SILENT/LIGHT_CHAT이 아니거나, 일정이 그 범위를 벗어나거나, " +
+                    "만나는 곳이 255자를 넘거나 사용할 수 없는 문자를 포함하면 400, " +
                     "이미 진행 중인 게시글/신청이 있으면 409로 거부됩니다.")
     @PostMapping
     public ResponseEntity<Void> create(
-            @RequestBody MatchRequestCreateRequest request,
+            @Valid @RequestBody MatchRequestCreateRequest request,
             @AuthenticationPrincipal CustomUserDetails principal
     ) {
         Long id = matchRequestCommandService.create(principal.getUserId(), request);
@@ -97,11 +102,14 @@ public class MatchRequestController {
     // 있다. 코스/거리/페이스/만나는 곳은 이 API로 못 바꾸며 별도 API(러닝 조건 수정) 담당이다.
     @Operation(summary = "모집글 수정",
             description = "일정과 대화 수준만 수정합니다. 코스·거리·페이스·만나는 곳은 러닝 조건 수정 API가 담당하며, " +
-                    "모집 중(SEARCHING) 상태일 때만 수정할 수 있습니다.")
+                    "모집 중(SEARCHING) 상태일 때만 수정할 수 있으며, 이미 신청이 들어왔거나 확정·취소·만료된 글이면 409가 " +
+                    "반환됩니다. 일정(scheduledAt)은 지금부터 " + MatchRequestCommandService.MIN_LEAD_HOURS + "시간 이후 ~ " +
+                    MatchRequestCommandService.MAX_LEAD_DAYS + "일 이내여야 하며, 일정·대화 수준(talkLevel)이 없거나 " +
+                    "대화 수준이 SILENT/LIGHT_CHAT이 아니거나 일정이 그 범위를 벗어나는 등 입력값이 잘못되면 400입니다.")
     @PatchMapping("/{id}")
     public ResponseEntity<Void> update(
             @PathVariable Long id,
-            @RequestBody MatchRequestUpdateRequest request,
+            @Valid @RequestBody MatchRequestUpdateRequest request,
             @AuthenticationPrincipal CustomUserDetails principal
     ) {
         matchRequestCommandService.update(principal.getUserId(), id, request);
@@ -112,7 +120,10 @@ public class MatchRequestController {
     // MatchRequestBoardController.cancelApplication)와는 다른 기능이니 헷갈리지 말 것.
     // 요청/응답 바디 없음.
     @Operation(summary = "모집글 취소",
-            description = "게시글 상태를 CANCELLED로 변경해 모집 탭에서 내립니다. 아래 신청 취소 API와는 다른 기능입니다.")
+            description = "게시글 상태를 CANCELLED로 변경해 모집 탭에서 내립니다. 모집 중(SEARCHING)인 게시글만 취소할 수 있으며, "
+                    + "신청이 진행 중(PENDING_CONFIRMATION)이거나 확정(MATCHED)되었거나 이미 마감·취소된 게시글은 409입니다. "
+                    + "신청이 진행 중이면 먼저 신청을 거절(POST /api/matching/matches/{id}/reject)하면 취소할 수 있습니다. "
+                    + "아래 신청 취소 API와는 다른 기능입니다.")
     @PostMapping("/{id}/cancel")
     public ResponseEntity<Void> cancel(
             @PathVariable Long id,

@@ -5,13 +5,16 @@ import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.dto.ActivityMatchStatusResponse;
 import com.team4.hanbbyeom.matching.dto.MatchConfirmResponse;
-import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
+import com.team4.hanbbyeom.matching.dto.MyActivityResponse;
+import com.team4.hanbbyeom.trust.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
+import com.team4.hanbbyeom.matching.service.ActivityCancelService;
+import com.team4.hanbbyeom.matching.service.ActivityHistoryService;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
-import com.team4.hanbbyeom.matching.service.TrustProfileLookupService;
+import com.team4.hanbbyeom.trust.service.TrustProfileLookupService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,23 +35,43 @@ public class ActivityMatchController {
     private final MatchParticipantRepository matchParticipantRepository;
     private final TrustProfileLookupService trustProfileLookupService;
     private final MatchDecisionService matchDecisionService;
+    private final ActivityHistoryService activityHistoryService;
+    private final ActivityCancelService activityCancelService;
 
     public ActivityMatchController(ActivityMatchRepository activityMatchRepository,
                                    MatchParticipantRepository matchParticipantRepository,
                                    TrustProfileLookupService trustProfileLookupService,
-                                   MatchDecisionService matchDecisionService) {
+                                   MatchDecisionService matchDecisionService,
+                                   ActivityHistoryService activityHistoryService,
+                                   ActivityCancelService activityCancelService) {
         this.activityMatchRepository = activityMatchRepository;
         this.matchParticipantRepository = matchParticipantRepository;
         this.trustProfileLookupService = trustProfileLookupService;
         this.matchDecisionService = matchDecisionService;
+        this.activityHistoryService = activityHistoryService;
+        this.activityCancelService = activityCancelService;
+    }
+
+    // 내 활동 이력 전체 목록(마이페이지 → 활동 이력 전체 보기). 내 모집글 목록(GET /api/matching/requests)과
+    // 같이 재매핑 없이 원본 상태와 후기·신고 제출 여부를 그대로 내려주고, 화면 칩·탭 판정은 프론트가 한다.
+    @Operation(summary = "내 활동 이력 목록 조회",
+            description = "내가 참가자이면서 한 번이라도 확정된 매칭(CONFIRMED/ENDED/CANCELLED)의 전체 목록을 활동 " +
+                    "시작 시각 최신순으로 반환합니다. 신청 대기·거절·만료처럼 확정된 적 없는 매칭은 포함되지 않습니다. " +
+                    "status는 원본 상태이고 submittedFeedbackType은 내가 제출한 후기(REVIEW)·노쇼 신고(NO_SHOW_REPORT)이며, " +
+                    "아무것도 제출하지 않았으면 null입니다. 상대가 탈퇴했다면 counterpartNickname은 null입니다.")
+    @GetMapping
+    public List<MyActivityResponse> getMyActivities(
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        return activityHistoryService.getMyActivities(principal.getUserId());
     }
 
     // 신청자·호스트 둘 다 조회 가능한 매칭 상세·상태 조회
     // 신청 결과 상태와 채팅방 상단에 표시할 코스·장소·예정 시간을 함께 반환
     @Operation(summary = "매칭 건 상세·상태 조회",
             description = "이 매칭의 호스트 또는 신청자 본인만 조회할 수 있습니다. 신청자가 폴링해서 " +
-                    "PROPOSED(대기중)/CONFIRMED(확정)/REJECTED(거절됨)/EXPIRED(응답시간 초과) 중 " +
-                    "무엇인지 구분하는 용도로 쓸 수 있습니다.")
+                    "PROPOSED(대기중)/CONFIRMED(확정)/REJECTED(거절됨)/CANCELLED(확정 후 취소됨)/" +
+                    "EXPIRED(응답시간 초과)/ENDED(활동 종료) 중 무엇인지 구분하는 용도로 쓸 수 있습니다.")
     @GetMapping("/{activityMatchId}")
     public ActivityMatchStatusResponse getStatus(
             @PathVariable Long activityMatchId,
@@ -71,6 +94,12 @@ public class ActivityMatchController {
                 .findFirst()
                 .orElse(null);
 
+        // 아직 신청자가 없는 매칭은 상대가 없으므로 조회 생략
+        String counterpartNickname = counterpartUserId == null
+                ? null
+                : matchParticipantRepository
+                        .findNicknameByActivityMatchIdAndUserId(activityMatchId, counterpartUserId);
+
         return new ActivityMatchStatusResponse(
                 activityMatch.getId(),
                 activityMatch.getStatus().name(),
@@ -78,6 +107,7 @@ public class ActivityMatchController {
                 activityMatch.getConfirmedAt(),
                 activityMatch.getClosedAt(),
                 counterpartUserId,
+                counterpartNickname,
                 activityMatch.getCourseName(),
                 activityMatch.getLocation(),
                 activityMatch.getScheduledAt(),
@@ -139,6 +169,22 @@ public class ActivityMatchController {
             @AuthenticationPrincipal CustomUserDetails principal
     ) {
         matchDecisionService.reject(principal.getUserId(), activityMatchId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // 확정된 활동에서 빠진다 — 채팅 화면의 "참여가 어려워졌어요 → 활동 참여 취소". 호스트·신청자 모두 호출할 수 있고,
+    // 확정 전(신청 취소·거절 이용)이거나 이미 취소·종료됐거나 시작된 활동은 취소할 수 없다(409).
+    @Operation(summary = "확정된 활동 참여 취소",
+            description = "이 매칭의 호스트 또는 신청자 본인만 호출할 수 있습니다. 확정(CONFIRMED)된 활동을 시작 전까지만 " +
+                    "취소할 수 있고, 확정 전이거나 이미 취소·종료됐거나 시작된 활동이면 409가 반환됩니다. " +
+                    "취소하면 상대의 채팅에 취소 메시지가 남고, 취소한 사람의 모집글은 취소되며 상대의 모집글은 " +
+                    "다시 모집 중(SEARCHING)이 됩니다. 별도의 패널티는 없습니다.")
+    @PostMapping("/{activityMatchId}/cancel")
+    public ResponseEntity<Void> cancel(
+            @PathVariable Long activityMatchId,
+            @AuthenticationPrincipal CustomUserDetails principal
+    ) {
+        activityCancelService.cancel(principal.getUserId(), activityMatchId);
         return ResponseEntity.noContent().build();
     }
 }

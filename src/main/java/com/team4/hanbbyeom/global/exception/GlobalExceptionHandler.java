@@ -1,5 +1,8 @@
 package com.team4.hanbbyeom.global.exception;
 
+import com.team4.hanbbyeom.auth.exception.DuplicateEmailException;
+import com.team4.hanbbyeom.auth.exception.EmailVerificationConflictException;
+import com.team4.hanbbyeom.auth.exception.VerificationResendTooSoonException;
 import com.team4.hanbbyeom.chat.exception.ChatUnavailableException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
@@ -71,14 +74,48 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(e.getMessage())); // Service가 던진 메시지를 그대로 응답 body에 담음
     }
 
-    // COMMON: 잘못된 메서드 인자 처리
+    // COMMON: 요청 값이 허용 범위를 벗어난 경우 처리
+    // 우리가 사용자에게 보여줄 목적으로 작성한 안내라 e.getMessage()를 그대로 노출
+    @ExceptionHandler(InvalidRequestValueException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRequestValue(
+            InvalidRequestValueException e // 서비스가 직접 던진 요청 값 오류
+    ) {
+        return ResponseEntity
+                .badRequest() // HTTP 상태코드를 400 Bad Request로 설정
+                .body(new ErrorResponse(e.getMessage())); // 의도한 안내 문구를 그대로 응답
+    }
+
+    // COMMON: 위에서 걸러지지 않은 잘못된 인자 처리
+    // IllegalArgumentException은 메시지에 내부 클래스명·구현 정보 등 원문이 담김
+    // →  대신 고정 문구만 응답하고, 원인 파악에 필요한 메시지는 서버 로그에만 기록
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(
             IllegalArgumentException e // IllegalArgumentException: 넘겨준 값 자체가 잘못됨
     ) {
+        log.warn("의도하지 않은 IllegalArgumentException 발생", e);
+
         return ResponseEntity
                 .badRequest() // HTTP 상태코드를 400 Bad Request로 설정
-                .body(new ErrorResponse(e.getMessage())); // 의도한 비즈니스 예외이므로 Service 메시지를 그대로 응답
+                .body(new ErrorResponse("요청 값이 올바르지 않습니다.")); // 내부 정보가 섞일 수 있어 고정 문구만 응답
+    }
+
+    // AUTH: 인증 기록·계정 상태 때문에 지금은 수행할 수 없는 요청 처리
+    // 입력값이 잘못된 것이 아니라 현재 상태가 요청을 허용하지 않는 경우라 400이 아닌 409로 응답
+    // 사용자에게 보여줄 목적으로 작성한 문구라 e.getMessage()를 그대로 노출
+    @ExceptionHandler({EmailVerificationConflictException.class, DuplicateEmailException.class})
+    public ResponseEntity<ErrorResponse> handleAuthConflict(RuntimeException e) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // AUTH: 재발송 대기시간 이내의 인증 코드 재요청 처리
+    // 대기시간이 지나면 같은 요청이 성공하는 일시적 제한이라 409가 아닌 429로 응답
+    @ExceptionHandler(VerificationResendTooSoonException.class)
+    public ResponseEntity<ErrorResponse> handleResendTooSoon(VerificationResendTooSoonException e) {
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ErrorResponse(e.getMessage()));
     }
 
     // MATCHING: 매칭 요청 값 검증 실패 처리

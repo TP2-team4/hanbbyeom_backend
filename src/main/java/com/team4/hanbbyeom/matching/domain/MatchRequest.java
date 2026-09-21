@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.domain;
 
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 
@@ -67,7 +68,7 @@ public class MatchRequest {
     // Day2 신규 — "모집글 수정": 아직 신청자가 없는(SEARCHING) 상태에서만 허용
     public void changeConditions(OffsetDateTime scheduledAt, TalkLevel talkLevel, OffsetDateTime searchExpiresAt) {
         if (this.status != MatchRequestStatus.SEARCHING) {
-            throw new IllegalStateException("모집 중인 게시글만 수정할 수 있어요.");
+            throw new MatchRequestNotSearchingException("모집 중인 게시글만 수정할 수 있어요.");
         }
         this.scheduledAt = scheduledAt;
         this.talkLevel = talkLevel;

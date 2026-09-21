@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.chat.controller;
 import com.team4.hanbbyeom.chat.domain.ChatMessage;
 import com.team4.hanbbyeom.chat.repository.ChatMessageRepository;
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import com.team4.hanbbyeom.global.time.MutableClock;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,17 +14,16 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -51,8 +51,16 @@ class ChatMessageIntegrationTest {
     @Autowired
     private ChatMessageRepository chatMessageRepository;
 
-    @MockitoBean
+    // Mockito 목이 아니라 MutableClock을 쓴다 — 목 스텁은 스레드 안전하지 않아서, 다른 스레드가 Clock을 읽는 사이에
+    // when() 스텁이 깨질 수 있다. 예전에는 테스트 컨텍스트에서도 MatchExpireScheduler가 돌면서 그 경합이 실제로
+    // 일어났다(#94 이후 플래키 원인). 지금은 테스트에서 스케줄링을 꺼 두었지만(SchedulingConfig) 같은 경합이
+    // 되살아나지 않도록 유지한다(MutableClock 참고).
+    @TestBean
     private Clock clock;
+
+    static Clock clock() {
+        return new MutableClock(Instant.now());
+    }
 
     @BeforeEach
     void setUpFixedClock() {
@@ -256,6 +264,24 @@ class ChatMessageIntegrationTest {
     }
 
     @Test
+    @DisplayName("NUL 문자가 있는 메시지는 400이고 저장되지 않음")
+    void NUL_문자_메시지_거부() throws Exception {
+        // NUL 문자(0x00)는 PostgreSQL 저장 불가라 검증이 없으면 DB 단계에서 500
+        // PostgreSQL에 저장할 수 없는 NUL 문자가 포함된 메시지를 요청 검증 단계에서 400으로 거절하고 DB에 저장하지 않는지 확인
+        TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\": \"a\\u0000b\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("메시지에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM chat_message WHERE activity_match_id = ?", Integer.class, match.activityMatchId())).isZero();
+    }
+
+    @Test
     @DisplayName("음수 afterId 조회 요청은 400")
     void 음수_afterId_거부() throws Exception {
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
@@ -454,8 +480,7 @@ class ChatMessageIntegrationTest {
     }
 
     private void setCurrentTime(OffsetDateTime currentTime) {
-        when(clock.instant()).thenReturn(currentTime.toInstant());
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
+        ((MutableClock) clock).setInstant(currentTime);
     }
 
     private void createParticipant(

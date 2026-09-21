@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.feedback.dto;
 
+import com.team4.hanbbyeom.global.validation.NoNulCharacter;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -27,6 +28,7 @@ public record ReviewCreateRequest(
     // null이면 후기 없이 별점+대화수준만 등록
     @Schema(description = "한 줄 후기", example = "즐거운 러닝이었어요!", maxLength = 100)
     @Size(max = 100, message = "후기는 100자 이하여야 합니다.")
+    @NoNulCharacter(message = "후기에 사용할 수 없는 문자가 포함되어 있어요.")
     String comment
 ) {
 }

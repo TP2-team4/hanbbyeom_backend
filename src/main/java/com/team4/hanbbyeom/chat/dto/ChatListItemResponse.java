@@ -13,6 +13,10 @@ public record ChatListItemResponse(
         @Schema(description = "상대 사용자 ID", example = "8")
         Long counterpartUserId,
 
+        @Schema(description = "상대 사용자 닉네임. 상대가 탈퇴한 경우 null이며, 표시 문구는 클라이언트에서 정한다",
+                example = "한뼘러너", nullable = true)
+        String counterpartNickname,
+
         @Schema(description = "매칭 상태", example = "CONFIRMED")
         String status,
 
