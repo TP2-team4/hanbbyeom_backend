@@ -44,7 +44,7 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
     // run_match_condition/running_course를 다시 조인할 필요가 없다 — 호스트 닉네임·신뢰도만
     // slot='A' 참가자를 거쳐 조인한다. 상태(PENDING/ACCEPTED/REJECTED/CANCELLED) 매핑과 상태
     // 필터링은 Service(MatchApplyService)가 closedByUserId까지 보고 판단한다.
-    // 호스트의 노쇼횟수·최근후기는 모집 탭 목록(MatchRequestRepository.searchBoard)과 같은 방식으로
+    // 호스트의 노쇼횟수·최근후기는 모집 탭 목록(MatchRequestRepository.BOARD_BASE, searchBoard*)과 같은 방식으로
     // 조인한다 — 세 화면(목록/상세/내 신청 내역)이 같은 AuthorSummary를 쓰는데 이 화면만 비어
     // 보이는 불일치를 막기 위함 (이슈 #70).
     @Query(value = """
