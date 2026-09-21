@@ -6,6 +6,7 @@ import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +25,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -117,16 +120,46 @@ class MatchRequestValidationIntegrationTest {
 
     // ---------- 등록 ----------
 
-    @ParameterizedTest(name = "등록 요청에서 {0}이(가) 없으면 500이 아니라 400이고 게시글은 만들어지지 않는다")
-    @ValueSource(strings = {"courseId", "meetingPoint", "distanceMinMeters", "distanceMaxMeters",
-            "paceMinSec", "paceMaxSec", "scheduledAt", "talkLevel"})
-    @DisplayName("등록 요청의 필수 필드가 없으면 400이다")
-    void 등록_필수_필드가_없으면_400이다(String missingField) throws Exception {
+    // 한 번에 한 필드만 빼므로 어느 문구가 나갈지 정해져 있다(핸들러는 첫 번째 필드 오류만 내려준다).
+    // 문구를 함께 고정하는 이유: message를 지우면 프론트에 Jakarta 기본 문구가 나가는데, 상태 코드만 보면 그걸 놓친다
+    @ParameterizedTest(name = "등록 요청에서 {0}이(가) 없으면 400과 \"{1}\" 안내를 주고 게시글은 만들어지지 않는다")
+    @CsvSource({
+            "courseId, 코스를 선택해주세요.",
+            "meetingPoint, 만나는 곳을 입력해주세요.",
+            "distanceMinMeters, 최소 거리를 입력해주세요.",
+            "distanceMaxMeters, 최대 거리를 입력해주세요.",
+            "paceMinSec, 최소 페이스를 입력해주세요.",
+            "paceMaxSec, 최대 페이스를 입력해주세요.",
+            "scheduledAt, 활동 시작 시각을 입력해주세요.",
+            "talkLevel, 대화 수준을 선택해주세요."
+    })
+    @DisplayName("등록 요청의 필수 필드가 없으면 400과 필드별 안내 문구를 준다")
+    void 등록_필수_필드가_없으면_400이다(String missingField, String expectedMessage) throws Exception {
         Long userId = createUser();
         Map<String, String> body = validCreateBody();
         body.remove(missingField);
 
-        create(userId, body).andExpect(status().isBadRequest());
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(expectedMessage));
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    // 필드 오류 순서는 보장되지 않으므로(핸들러가 findFirst 사용) 특정 문구를 단정하지 않는다.
+    // 여러 개가 빠져도 500이 아니라 400이고, 안내 문구 중 하나가 나간다는 것까지가 보장 범위다
+    @Test
+    @DisplayName("등록 요청의 필수 필드가 여러 개 없어도 400이고 안내 문구 중 하나를 준다")
+    void 등록_필수_필드가_여러_개_없어도_400이다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.remove("courseId");
+        body.remove("talkLevel");
+
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value(anyOf(is("코스를 선택해주세요."), is("대화 수준을 선택해주세요."))));
 
         assertThat(postsOf(userId)).isZero();
     }
@@ -138,7 +171,9 @@ class MatchRequestValidationIntegrationTest {
         Map<String, String> body = validCreateBody();
         body.put("talkLevel", "null");
 
-        create(userId, body).andExpect(status().isBadRequest());
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("대화 수준을 선택해주세요."));
 
         assertThat(postsOf(userId)).isZero();
     }
@@ -150,7 +185,9 @@ class MatchRequestValidationIntegrationTest {
         Map<String, String> body = validCreateBody();
         body.put("meetingPoint", "\"   \"");
 
-        create(userId, body).andExpect(status().isBadRequest());
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳을 입력해주세요."));
 
         assertThat(postsOf(userId)).isZero();
     }
@@ -170,6 +207,40 @@ class MatchRequestValidationIntegrationTest {
         assertThat(postsOf(userId)).isZero();
     }
 
+    // run_match_condition.meeting_point와 activity_match.location(확정 시 복사)이 모두 VARCHAR(255)다.
+    // 검증이 없으면 256자부터 INSERT가 "value too long"으로 실패해 500이 된다.
+    @Test
+    @DisplayName("등록 요청의 만나는 곳이 255자를 넘으면 400이다")
+    void 등록_만나는_곳이_255자를_넘으면_400이다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("meetingPoint", "\"" + "가".repeat(256) + "\"");
+
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳은 255자 이하로 입력해주세요."));
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    // 상한은 바이트가 아니라 문자 수다(Postgres VARCHAR(n)은 문자 수 기준). 한글 255자는 UTF-8로 765바이트지만 저장된다.
+    // postsOf()가 flush해서 실제 INSERT까지 실행되므로, DB가 거절하면 이 테스트가 실패한다
+    @Test
+    @DisplayName("등록 요청의 만나는 곳이 정확히 255자면 정상 등록된다")
+    void 등록_만나는_곳이_255자면_등록된다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("meetingPoint", "\"" + "가".repeat(255) + "\"");
+
+        create(userId, body).andExpect(status().isCreated());
+
+        assertThat(postsOf(userId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT char_length(rc.meeting_point) FROM run_match_condition rc "
+                        + "JOIN match_request mr ON mr.id = rc.match_request_id WHERE mr.user_id = ?",
+                Integer.class, userId)).isEqualTo(255);
+    }
+
     @ParameterizedTest(name = "등록 요청의 talkLevel {0}은 정상으로 저장된다")
     @ValueSource(strings = {"SILENT", "LIGHT_CHAT"})
     @DisplayName("정해진 talkLevel 값은 문자열 그대로 받아 저장한다(JSON 형식은 그대로)")
@@ -187,46 +258,54 @@ class MatchRequestValidationIntegrationTest {
 
     // ---------- 수정 ----------
 
-    @ParameterizedTest(name = "수정 요청에서 {0}이(가) 없으면 500이 아니라 400이고 게시글은 그대로다")
-    @ValueSource(strings = {"scheduledAt", "talkLevel"})
-    @DisplayName("수정 요청의 필수 필드가 없으면 400이다")
-    void 수정_필수_필드가_없으면_400이다(String missingField) throws Exception {
+    @ParameterizedTest(name = "수정 요청에서 {0}이(가) 없으면 400과 \"{1}\" 안내를 주고 게시글은 그대로다")
+    @CsvSource({
+            "scheduledAt, 활동 시작 시각을 입력해주세요.",
+            "talkLevel, 대화 수준을 선택해주세요."
+    })
+    @DisplayName("수정 요청의 필수 필드가 없으면 400과 필드별 안내 문구를 준다")
+    void 수정_필수_필드가_없으면_400이다(String missingField, String expectedMessage) throws Exception {
         Long userId = createUser();
         Long postId = createPost(userId);
         Map<String, String> body = validUpdateBody();
         body.remove(missingField);
 
-        update(userId, postId, body).andExpect(status().isBadRequest());
+        update(userId, postId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(expectedMessage));
+
+        assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
+    }
+
+    @Test
+    @DisplayName("수정 요청의 talkLevel이 null이면 400이다")
+    void 수정_talkLevel이_null이면_400이다() throws Exception {
+        Long userId = createUser();
+        Long postId = createPost(userId);
+        Map<String, String> body = validUpdateBody();
+        body.put("talkLevel", "null");
+
+        update(userId, postId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("대화 수준을 선택해주세요."));
 
         assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
     }
 
     @ParameterizedTest(name = "수정 요청의 talkLevel이 {0}이면 400이고 내부 예외 문구를 노출하지 않는다")
-    @ValueSource(strings = {"\"TALKATIVE\"", "null", "true"})
-    @DisplayName("수정 요청의 talkLevel이 정해진 값이 아니거나 null이면 400이다")
+    @ValueSource(strings = {"\"TALKATIVE\"", "true"})
+    @DisplayName("수정 요청의 talkLevel이 정해진 값이 아니면 400이다")
     void 수정_talkLevel이_잘못된_값이면_400이다(String badValue) throws Exception {
         Long userId = createUser();
         Long postId = createPost(userId);
         Map<String, String> body = validUpdateBody();
         body.put("talkLevel", badValue);
 
-        // null은 형식 오류가 아니라 필수값 누락이라 문구가 다르다. 둘 다 400이라는 점만 확인한다
-        update(userId, postId, body).andExpect(status().isBadRequest());
-
-        assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
-    }
-
-    @Test
-    @DisplayName("수정 요청의 talkLevel이 잘못된 값이면 형식 오류 문구를 준다")
-    void 수정_talkLevel이_잘못된_값이면_형식_오류_문구를_준다() throws Exception {
-        Long userId = createUser();
-        Long postId = createPost(userId);
-        Map<String, String> body = validUpdateBody();
-        body.put("talkLevel", "\"TALKATIVE\"");
-
         update(userId, postId, body)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(ENUM_FORMAT_MESSAGE));
+
+        assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
     }
 
     @Test
