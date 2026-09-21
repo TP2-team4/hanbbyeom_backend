@@ -246,7 +246,7 @@ class MatchRequestValidationIntegrationTest {
     // 값은 JSON 이스케이프 문자열로 넘긴다(파싱되면 실제 NUL 문자가 된다). postsOf()가 flush하므로, 요청이 통과해
     // INSERT가 남아 있었다면 DB 예외로 이 테스트가 실패한다
     @ParameterizedTest(name = "등록 요청의 만나는 곳에 NUL 문자가 있으면({0}) 400이고 게시글은 만들어지지 않는다")
-    @ValueSource(strings = {"a\\u0000b", "\\u0000", "뚝섬\\u0000"})
+    @ValueSource(strings = {"a\\u0000b", "뚝섬\\u0000"})
     @DisplayName("등록 요청의 만나는 곳에 NUL 문자가 있으면 400이다")
     void 등록_만나는_곳에_NUL_문자가_있으면_400이다(String jsonEscaped) throws Exception {
         Long userId = createUser();
@@ -256,6 +256,22 @@ class MatchRequestValidationIntegrationTest {
         create(userId, body)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    // NUL 문자뿐인 값은 @NotBlank도 함께 실패할 수 있다(검증기 구현에 따라 String.trim()이 U+0020 이하를 제거하기도 한다).
+    // 한 필드에 위반이 둘 겹치면 핸들러가 쓰는 첫 오류가 어느 쪽인지 보장되지 않으므로, 이 케이스는 문구를 단정하지 않고
+    // 400과 저장되지 않음만 확인한다(여러 필드가 빠졌을 때 문구를 단정하지 않는 것과 같은 원칙).
+    // NUL 규칙 자체와 문구는 위 두 값이 덮는다
+    @Test
+    @DisplayName("등록 요청의 만나는 곳이 NUL 문자뿐이면 400이다")
+    void 등록_만나는_곳이_NUL_문자뿐이면_400이다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("meetingPoint", "\"\\u0000\"");
+
+        create(userId, body).andExpect(status().isBadRequest());
 
         assertThat(postsOf(userId)).isZero();
     }
