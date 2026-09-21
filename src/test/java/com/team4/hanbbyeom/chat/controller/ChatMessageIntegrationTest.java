@@ -51,8 +51,10 @@ class ChatMessageIntegrationTest {
     @Autowired
     private ChatMessageRepository chatMessageRepository;
 
-    // Mockito 목이 아니라 MutableClock을 쓴다 — 테스트 컨텍스트에서도 MatchExpireScheduler가 돌면서
-    // Clock 빈을 읽기 때문에, when() 스텁 중에 스케줄러 스레드가 끼어들면 스텁이 깨진다(#94 이후 플래키 원인).
+    // Mockito 목이 아니라 MutableClock을 쓴다 — 목 스텁은 스레드 안전하지 않아서, 다른 스레드가 Clock을 읽는 사이에
+    // when() 스텁이 깨질 수 있다. 예전에는 테스트 컨텍스트에서도 MatchExpireScheduler가 돌면서 그 경합이 실제로
+    // 일어났다(#94 이후 플래키 원인). 지금은 테스트에서 스케줄링을 꺼 두었지만(SchedulingConfig) 같은 경합이
+    // 되살아나지 않도록 유지한다(MutableClock 참고).
     @TestBean
     private Clock clock;
 
