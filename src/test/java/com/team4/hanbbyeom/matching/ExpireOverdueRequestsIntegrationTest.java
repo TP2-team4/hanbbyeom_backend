@@ -9,6 +9,7 @@ import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.matching.service.MatchDecisionService;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
+import com.team4.hanbbyeom.trust.repository.TrustProfileRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
@@ -48,6 +49,7 @@ class ExpireOverdueRequestsIntegrationTest {
     @Autowired private ActivityMatchRepository activityMatchRepository;
     @Autowired private MatchParticipantRepository matchParticipantRepository;
     @Autowired private MatchDecisionService matchDecisionService;
+    @Autowired private TrustProfileRepository trustProfileRepository;
     @Autowired private MatchRequestCommandService matchRequestCommandService;
 
     private Long createUser(String label) {
@@ -237,7 +239,7 @@ class ExpireOverdueRequestsIntegrationTest {
         OffsetDateTime boundary = OffsetDateTime.of(2026, 9, 1, 10, 0, 0, 0, ZoneOffset.UTC);
         MatchDecisionService atBoundary = new MatchDecisionService(
                 matchRequestRepository, activityMatchRepository, matchParticipantRepository, jdbcTemplate,
-                Clock.fixed(boundary.toInstant(), ZoneOffset.UTC));
+                trustProfileRepository, Clock.fixed(boundary.toInstant(), ZoneOffset.UTC));
 
         Long exactly = createPost(createUser("정확히"));
         Long oneSecondBefore = createPost(createUser("일초전에만료"));
