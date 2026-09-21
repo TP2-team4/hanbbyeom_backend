@@ -30,6 +30,13 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     // 인덱스 첫 행만 읽고 끝난다. 후기가 없으면 두 컬럼 모두 NULL (이슈 #70).
     // 탈퇴한 작성자(users.deleted_at IS NOT NULL)의 글은 제외한다 — 탈퇴 시 닉네임이 NULL로 지워져도
     // SEARCHING 상태의 모집글은 그대로 남기 때문에, 이 조건이 없으면 닉네임 없는 글이 목록에 노출된다.
+    // 작성자가 지금 다른 신청·활동에 묶여 있는 글(match_participant에 released_at IS NULL 행이 있음)도 제외한다
+    // (이슈 #120). 신청은 신청자 본인 글의 상태를 바꾸지 않아, 다른 글에 신청한 작성자의 글이
+    // SEARCHING으로 계속 보이는데 그 글에 신청하면 #112의 검사가 409로 거절한다.
+    // 그 검사가 쓰는 기준(MatchParticipantRepository.findActiveActivityMatchIdByUserId, released_at IS NULL)과
+    // 똑같이 걸러야 "목록에 보이는 글 = 신청할 수 있는 글"이 성립한다.
+    // 서브쿼리 조건은 부분 유니크 인덱스 uq_participant_active_user (user_id) WHERE released_at IS NULL 과
+    // 정확히 일치해서 작성자당 인덱스 조회 한 번으로 끝난다 — 별도 인덱스 불필요.
     // WHERE절의 파라미터들은 전부 "값이 없으면(:xxx IS NULL) 그 조건은 무시"하는 선택적 필터이고,
     // 거리/페이스는 정확히 일치가 아니라 "게시글의 범위와 필터 범위가 겹치는지"로 판단한다
     // (예: 필터 minDistance=9000인데 게시글이 5000~8000이면 겹치지 않으므로 제외).
@@ -74,6 +81,10 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
       AND mr.activity_type = 'RUN'
       AND u.deleted_at IS NULL
       AND mr.user_id <> :excludeUserId
+      AND NOT EXISTS (
+          SELECT 1 FROM match_participant mp
+          WHERE mp.user_id = mr.user_id AND mp.released_at IS NULL
+      )
       AND (:course IS NULL OR co.name = :course)
       AND (:talkLevel IS NULL OR mr.talk_level = :talkLevel)
       AND (:minDistance IS NULL OR rc.distance_max_meters >= :minDistance)

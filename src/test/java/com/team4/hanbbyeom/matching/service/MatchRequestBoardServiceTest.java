@@ -112,7 +112,10 @@ class MatchRequestBoardServiceTest {
     // created_at을 직접 넣는 이유: 같은 트랜잭션 안의 now()는 전부 같은 값이라 정렬 순서를 가를 수 없다.
     // chk_match_request_time(created_at < search_expires_at < scheduled_at)을 만족하도록 미래 시각으로 잡는다.
     private Long createSearchingPost(OffsetDateTime createdAt) {
-        Long authorId = createUser("작성자");
+        return createSearchingPost(createUser("작성자"), createdAt);
+    }
+
+    private Long createSearchingPost(Long authorId, OffsetDateTime createdAt) {
         Long id = jdbcTemplate.queryForObject("""
                 INSERT INTO match_request (user_id, scheduled_at, talk_level, search_expires_at, created_at)
                 VALUES (?, ?, 'LIGHT_CHAT', ?, ?) RETURNING id
@@ -123,6 +126,28 @@ class MatchRequestBoardServiceTest {
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, id, testCourseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400);
         return id;
+    }
+
+    // userId를 "다른 글에 신청 중"인 상태로 만든다 — 아직 응답 대기(PROPOSED)인 매칭에 신청자(slot B)로 참가시킨다.
+    // 신청은 apply()가 하는 것과 같이 match_request_id 없이(null) 참가 행만 만들고,
+    // 이 행이 활성(released_at IS NULL)인 동안 #112의 apply() 검사와 이 이슈(#120)의 목록 제외가 같은 기준으로 걸린다.
+    // 돌려주는 참가 행을 release()하면 "신청 취소/거절/종료" 상황이 된다.
+    private MatchParticipant bindToPendingMatch(Long userId) {
+        OffsetDateTime base = OffsetDateTime.now();
+        ActivityMatch activityMatch = new ActivityMatch(
+                base.plusHours(30), base.plusHours(31), TalkLevel.SILENT,
+                "뚝섬 한강공원", "뚝섬 한강공원 코스", 5000, 12000,
+                "뚝섬유원지역 3번 출구", 360, 400,
+                base.plusHours(24), base
+        );
+        Long activityMatchId = activityMatchRepository.save(activityMatch).getId();
+        return matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, null, userId, "B", AcceptStatus.ACCEPTED));
+    }
+
+    private List<Long> boardIds() {
+        return getBoardItems(null, null, null, null, null, null, null, -1L, null, 20)
+                .stream().map(MatchBoardItemResponse::id).toList();
     }
 
     private void giveReviewToTestUser(String comment) {
@@ -412,6 +437,73 @@ class MatchRequestBoardServiceTest {
         assertThat(fromDetail.rating()).isNull();
         assertThat(fromDetail.completedCount()).isZero();
         assertThat(fromDetail.noShowCount()).isZero();
+    }
+
+    // ---------- 신청할 수 없는 글 제외 (이슈 #120) ----------
+    // #112가 apply()에서 "작성자가 다른 신청·활동에 묶여 있으면 409"로 거절하는 글은 목록에서도 빠져야 한다.
+    // 기준은 #112와 같은 match_participant.released_at IS NULL — 어긋나면 "보이는데 안 되는 글"이 생긴다.
+
+    @Test
+    void 작성자가_다른_글에_신청_중이면_그_작성자의_글은_목록에서_빠진다() {
+        Long busyAuthor = createUser("신청중작성자");
+        Long busyPost = createSearchingPost(busyAuthor, OffsetDateTime.now().minusHours(1));
+        bindToPendingMatch(busyAuthor);
+
+        assertThat(boardIds()).containsExactly(testMatchRequestId).doesNotContain(busyPost);
+    }
+
+    // 확정(CONFIRMED)돼도 참가 행은 그대로 활성이라 계속 빠져야 한다 — 활동이 끝나 release될 때까지.
+    @Test
+    void 작성자가_확정된_활동_중이어도_목록에서_빠진다() {
+        Long busyAuthor = createUser("활동중작성자");
+        Long busyPost = createSearchingPost(busyAuthor, OffsetDateTime.now().minusHours(1));
+        MatchParticipant participation = bindToPendingMatch(busyAuthor);
+        activityMatchRepository.findById(participation.getActivityMatchId()).orElseThrow().confirm("123456");
+
+        assertThat(boardIds()).doesNotContain(busyPost);
+    }
+
+    // 신청 취소·거절·활동 종료는 모두 참가 행 release()로 끝난다 — 그 뒤엔 다시 보여야 한다.
+    @Test
+    void 참가가_해제되면_그_작성자의_글이_다시_보인다() {
+        Long author = createUser("돌아온작성자");
+        Long post = createSearchingPost(author, OffsetDateTime.now().minusHours(1));
+        MatchParticipant participation = bindToPendingMatch(author);
+        assertThat(boardIds()).doesNotContain(post);
+
+        participation.release();
+        matchParticipantRepository.saveAndFlush(participation);
+
+        assertThat(boardIds()).contains(post);
+    }
+
+    // 본인 모집글만 있고 어디에도 참가하지 않은 작성자는 기존과 같이 보인다 (setUp의 testUserId가 그 경우).
+    @Test
+    void 참가_행이_없는_작성자의_글은_그대로_보인다() {
+        Long freePost = createSearchingPost(OffsetDateTime.now().minusHours(1));
+
+        assertThat(boardIds()).containsExactly(testMatchRequestId, freePost);
+    }
+
+    // 제외된 글은 페이지 크기 계산에서도 빠져야 한다 — size+1 조회가 제외 글을 세면 hasNext가 틀어진다.
+    @Test
+    void 제외된_글은_커서_페이징의_개수_계산에서도_빠진다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(1);
+        Long p1 = createSearchingPost(base.plusHours(3));
+        Long busyAuthor = createUser("신청중작성자");
+        createSearchingPost(busyAuthor, base.plusHours(2)); // 정렬상 p1과 p3 사이 — 빠져야 함
+        bindToPendingMatch(busyAuthor);
+        Long p3 = createSearchingPost(base.plusHours(1));
+
+        MatchBoardPageResponse first = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 2);
+        MatchBoardPageResponse second = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, first.nextCursor(), 2);
+
+        assertThat(first.items()).extracting(MatchBoardItemResponse::id).containsExactly(testMatchRequestId, p1);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.items()).extracting(MatchBoardItemResponse::id).containsExactly(p3);
+        assertThat(second.hasNext()).isFalse();
     }
 
     // ---------- 커서 페이징 (이슈 #103) ----------
