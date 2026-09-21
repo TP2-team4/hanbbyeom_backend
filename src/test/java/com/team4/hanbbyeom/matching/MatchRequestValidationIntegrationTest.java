@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -438,12 +439,16 @@ class MatchRequestValidationIntegrationTest {
         Long userId = createUser();
         Long postId = createPost(userId);
         Map<String, String> body = validUpdateBody();
-        OffsetDateTime newSchedule = OffsetDateTime.now().plusDays(MatchRequestCommandService.MAX_LEAD_DAYS - 1);
+        // Postgres timestamptz는 마이크로초까지만 저장하고 나노초는 반올림한다. 보내는 값을 그대로 두고 기대값만 버림(truncatedTo)으로
+        // 계산하면 나노 자리가 500 이상일 때 저장값과 1µs 어긋난다(약 50%). 보내는 값 자체를 마이크로초로 잘라, 저장값과 기대값이
+        // 나노초와 무관하게 결정적으로 같게 한다
+        OffsetDateTime newSchedule = OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS)
+                .plusDays(MatchRequestCommandService.MAX_LEAD_DAYS - 1);
         body.put("scheduledAt", "\"" + newSchedule + "\"");
 
         update(userId, postId, body).andExpect(status().isNoContent());
 
-        assertThat(scheduledAtOf(postId).toInstant()).isEqualTo(newSchedule.toInstant().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        assertThat(scheduledAtOf(postId).toInstant()).isEqualTo(newSchedule.toInstant());
     }
 
     @Test
