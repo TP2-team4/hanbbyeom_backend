@@ -52,9 +52,11 @@ class AuthErrorStatusIntegrationTest {
     private static final String DUMMY_CODE_HASH = "00".repeat(32);
     private static final String ANY_CODE = "123456";
 
-    // 255자를 넘는 이메일. @Email은 로컬 파트가 64자를 넘는 주소를 먼저 거절하므로, 로컬 파트 244자 같은 값은 @Size가 없어도
-    // 400이라 길이 검증을 확인하지 못한다. 로컬 파트를 64자로 두어 형식은 유효하면서 길이만 초과하는 값(260자)을 쓴다
-    private static final String TOO_LONG_EMAIL = "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "com";
+    // 길이 제한(255자)을 확인하기 위한 테스트용 이메일
+    // @Email 형식 검증에 걸리지 않도록 로컬 파트는 64자로 맞추고,
+    // 전체 길이만 255자를 초과하도록 구성
+    private static final String TOO_LONG_EMAIL =
+            "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "com";
 
     // 테스트 간 이메일 UNIQUE 제약 충돌 방지
     private String randomEmail() {
@@ -223,14 +225,14 @@ class AuthErrorStatusIntegrationTest {
     @Test
     @DisplayName("255자를 넘는 이메일의 인증 코드 확인 요청도 400")
     void 이메일_길이_초과_확인_요청_400() throws Exception {
-        // 검증이 없으면 길이 초과가 그대로 서비스까지 가서 "발송 내역 없음" 409로 나간다
+        // 이메일 길이 검증이 없으면 서비스 로직까지 진행, "발송 내역 없음" 409로 응답될 수 있으므로
+        // 255자를 초과한 이메일을 요청 단계에서 400으로 거절하는지 확인
         confirmCode(TOO_LONG_EMAIL, VerificationPurpose.SIGNUP, ANY_CODE)
                 .andExpect(status().isBadRequest());
     }
 
-    // 이메일이 누락되거나 null·빈 문자열이면 @Email은 통과시킨다(null·빈 값은 유효로 본다). 그 값이 서비스까지 가면
-    // EmailNormalizer.normalize()의 email.trim()에서 NullPointerException으로 500이 나므로, DTO의 @NotBlank가 유일한 방어선이다.
-    // 두 인증 요청 모두 그 방어선을 고정한다
+    // 이메일 필드의 상태를 바꿔 테스트하기 위한 요청 바디 조각
+    // MISSING: 필드 없음 / NULL: null / EMPTY: 빈 문자열
     private static String emailField(String kind) {
         return switch (kind) {
             case "MISSING" -> "";
@@ -239,20 +241,24 @@ class AuthErrorStatusIntegrationTest {
         };
     }
 
-    @ParameterizedTest(name = "이메일이 {0}이면 인증 코드 발송 요청은 400")
+    @ParameterizedTest(name = "{0} 이메일의 인증 코드 발송 요청은 400")
     @ValueSource(strings = {"MISSING", "NULL", "EMPTY"})
-    @DisplayName("이메일이 누락·null·빈 문자열이면 인증 코드 발송 요청은 400")
-    void 이메일이_비어_있으면_발송_요청은_400(String kind) throws Exception {
+    @DisplayName("누락·null·빈 문자열 이메일의 인증 코드 발송 요청은 400")
+    void 이메일_누락_발송_요청_400(String kind) throws Exception {
+        // @Email은 null·빈 값을 유효로 보고 통과시킴
+        // → DTO의 @NotBlank가 유일한 방어선
+        // @NotBlank가 누락·null·빈 문자열을 400으로 거절하는지 확인
         mockMvc.perform(post("/api/auth/email-verifications")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{" + emailField(kind) + "\"purpose\": \"SIGNUP\"}"))
                 .andExpect(status().isBadRequest());
     }
 
-    @ParameterizedTest(name = "이메일이 {0}이면 인증 코드 확인 요청은 400")
+    @ParameterizedTest(name = "{0} 이메일의 인증 코드 확인 요청은 400")
     @ValueSource(strings = {"MISSING", "NULL", "EMPTY"})
-    @DisplayName("이메일이 누락·null·빈 문자열이면 인증 코드 확인 요청은 400")
-    void 이메일이_비어_있으면_확인_요청은_400(String kind) throws Exception {
+    @DisplayName("누락·null·빈 문자열 이메일의 인증 코드 확인 요청도 400")
+    void 이메일_누락_확인_요청_400(String kind) throws Exception {
+        // 인증 코드 확인 요청에서도 동일한 이메일 검증이 적용되는지 확인
         mockMvc.perform(post("/api/auth/email-verifications/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{" + emailField(kind) + "\"purpose\": \"SIGNUP\", \"code\": \"123456\"}"))
