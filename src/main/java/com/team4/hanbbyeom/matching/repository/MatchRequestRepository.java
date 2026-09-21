@@ -179,12 +179,12 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
         Instant getLatestReviewCreatedAt();
     }
 
-    // 모집글 상세(GET /api/matching/requests/{id})용 조회. 목록(searchBoard)과 달리
+    // 모집글 상세(GET /api/matching/requests/{id})용 조회. 목록(searchBoard*)과 달리
     // status·meetingPoint까지 포함하고, status 필터 없이 어떤 상태의 글이든 조회 가능
     // (작성자 본인이 취소/완료된 자기 글을 다시 열어볼 수도 있어야 하므로).
     // 작성자 닉네임은 여기서 조인하지 않는다 — Service(MatchRequestBoardService)가 별도로
     // fetchNicknames()를 호출해서 채운다(도메인 간 결합도를 낮추려는 의도). 다만 평점/완료횟수/
-    // 노쇼횟수/최근후기는 searchBoard와 똑같이 여기서 조인해서 내려준다 — 이전엔 이 값들을
+    // 노쇼횟수/최근후기는 목록(BOARD_BASE)과 똑같이 여기서 조인해서 내려준다 — 이전엔 이 값들을
     // 아예 안 가져와서 Service가 null로 하드코딩했었다 (이슈 #70 버그 수정).
     @Query(value = """
         SELECT
