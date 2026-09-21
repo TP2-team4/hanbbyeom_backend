@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.*;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
+import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
@@ -491,5 +492,38 @@ class MatchApplyServiceTest {
         Long anotherApplicantUserId = createUser("applicant2");
         assertThatThrownBy(() -> matchApplyService.apply(anotherApplicantUserId, hostRequestId))
                 .isInstanceOf(MatchRequestNotSearchingException.class);
+    }
+
+    // 사용자당 활성 참가는 하나뿐이라(uq_participant_active_user), 이미 신청 중이거나 확정된 활동이 있는 사람이 관여한 새 신청은
+    // match_participant INSERT에서 제약 위반(500)이 났다. 이제 apply()가 미리 걸러 409로 원인을 알리고 아무것도 만들지 않는다.
+    @Test
+    void 이미_진행_중인_신청이_있는_신청자의_새_신청은_거부되고_아무것도_만들지_않는다() {
+        Long otherHostRequestId = createHostRequest(createUser("host2"));
+        matchApplyService.apply(applicantUserId, hostRequestId);
+        long matchCountBefore = activityMatchRepository.count();
+
+        assertThatThrownBy(() -> matchApplyService.apply(applicantUserId, otherHostRequestId))
+                .isInstanceOf(AlreadyHasActiveMatchRequestException.class)
+                .hasMessage("이미 진행 중인 신청이나 활동이 있어요.");
+
+        assertThat(activityMatchRepository.count()).isEqualTo(matchCountBefore);
+        assertThat(matchRequestRepository.findById(otherHostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
+    }
+
+    // 신청은 신청자 본인 게시글의 상태를 바꾸지 않아, 다른 글에 신청 중인 호스트의 글도 계속 SEARCHING으로 보인다.
+    // 그 글에 온 신청은 호스트의 활성 참가와 겹치므로 같은 이유로 거부해야 한다.
+    @Test
+    void 이미_다른_글에_신청한_작성자의_글에는_신청할_수_없다() {
+        Long otherHostRequestId = createHostRequest(createUser("host2"));
+        matchApplyService.apply(hostUserId, otherHostRequestId); // 호스트가 다른 글에 신청 — 본인 글은 그대로 SEARCHING
+        long matchCountBefore = activityMatchRepository.count();
+
+        assertThatThrownBy(() -> matchApplyService.apply(applicantUserId, hostRequestId))
+                .isInstanceOf(MatchRequestNotSearchingException.class);
+
+        assertThat(activityMatchRepository.count()).isEqualTo(matchCountBefore);
+        assertThat(matchRequestRepository.findById(hostRequestId).orElseThrow().getStatus())
+                .isEqualTo(MatchRequestStatus.SEARCHING);
     }
 }

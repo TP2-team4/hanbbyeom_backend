@@ -119,6 +119,23 @@ public class MatchApplyService {
             throw new InvalidMatchRequestException("활동 시작 시각이 너무 임박해서 신청할 수 없어요.");
         }
 
+        // 아래 두 검사는 시작 임박 가드(400) 뒤에 둔다. 400은 "이 요청은 앞으로도 안 된다", 409는 "지금 상태가 안 되니 나중에 다시
+        // 시도"라는 뜻이라, 두 조건이 함께 걸리면 최종 거절인 400을 먼저 알려야 한다. 시작이 임박한 글은 시간이 갈수록 더 신청할 수 없어지는데
+        // 409로 안내하면 사용자가 새로고침과 재시도만 반복하게 된다. 두 검사 모두 매칭·참가자를 만들기 전이라, 거절되면 아무것도
+        // 만들어지지 않는 성질은 그대로다.
+        // 사용자당 활성 참가는 하나뿐이다(uq_participant_active_user). 이미 다른 글에 신청 중이거나 확정된 활동이 있는 사람이 관여하면
+        // 아래 match_participant INSERT가 그 제약 위반으로 500이 되므로, 미리 걸러 409로 원인을 알린다.
+        // 참가는 신청 시점에 만들어지고 신청은 신청자 본인 게시글의 상태를 바꾸지 않아, 본인 글이 있는 사람은 다른 글에 신청해도
+        // 그 글이 계속 SEARCHING으로 목록에 보인다 — 그 글에 온 신청도 같은 이유로 걸러야 한다.
+        if (matchParticipantRepository.findActiveActivityMatchIdByUserId(applicantUserId).isPresent()) {
+            throw new AlreadyHasActiveMatchRequestException("이미 진행 중인 신청이나 활동이 있어요.");
+        }
+        // 호스트가 이미 다른 신청·활동에 묶여 있으면 이 글로는 새 매칭을 만들 수 없다. 신청자 입장에서는 "지금 신청할 수 없는 글"이라
+        // 다른 진행 중 신청과 같은 메시지를 쓴다(호스트의 사정을 자세히 드러내지 않는다).
+        if (matchParticipantRepository.findActiveActivityMatchIdByUserId(hostRequest.getUserId()).isPresent()) {
+            throw new MatchRequestNotSearchingException("이미 마감되었거나 신청이 진행 중인 모집글이에요.");
+        }
+
         // 4) activity_match 생성 (PROPOSED) — createdAt에 위 가드에서 쓴 것과 정확히 같은 now를
         // 넘긴다. ActivityMatch가 내부에서 OffsetDateTime.now()를 다시 호출하면 그 사이 시간차만큼
         // created_at < decision_expires_at 제약을 위반할 여지가 생긴다(팀원 리뷰로 발견한 회귀 —
