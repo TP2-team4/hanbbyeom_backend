@@ -195,7 +195,8 @@ public class MatchDecisionService {
                 } else {
                     // 활동 종료 시각은 지났는데 1분 주기 스케줄러(endOverdueActivities())가 아직 처리하기 전인 건.
                     // 이미 끝난 활동을 취소로 바꾸면 안 되므로, 스케줄러가 했을 처리(ENDED + 게시글 CLOSED)를 앞당긴다.
-                    activityMatch.end();
+                    // 완료한 활동 수도 스케줄러가 했을 것과 똑같이 집계한다.
+                    endAndCountCompletion(activityMatch, host.get(), applicant.get());
                     requestStatusAfter = MatchRequestStatus.CLOSED;
                 }
             }
@@ -291,7 +292,7 @@ public class MatchDecisionService {
                 continue;
             }
 
-            activityMatch.end();
+            endAndCountCompletion(activityMatch, host.get(), applicant.get());
 
             // 게시글을 CLOSED로 전이한다 — reject()/expireOverdue()처럼 SEARCHING으로 되돌릴
             // 이유는 없지만(활동이 정상적으로 끝난 것), MATCHED에 그대로 두면 안 된다. MATCHED는
@@ -303,6 +304,32 @@ public class MatchDecisionService {
             applicant.get().release();
             transitionBothRequests(host.get(), applicant.get(), MatchRequestStatus.CLOSED);
         }
+    }
+
+    // 활동을 ENDED로 닫고 두 참가자의 "완료한 활동 수"를 올린다(이슈 #96). ActivityMatch.end()를 호출하는 곳은
+    // 스케줄러(endOverdueActivities)와 탈퇴 정리(closeActiveMatchByWithdrawal) 두 곳뿐이라, 완료 집계도 이 메서드
+    // 하나에만 둔다 — 한쪽에서만 집계하면 두 경로의 값이 어긋난다.
+    //
+    // 완료한 활동은 activity_match.status의 ENDED 전이 기준이다. 후기·노쇼 신고 여부와 무관하며, CANCELLED·EXPIRED·
+    // REJECTED는 집계하지 않는다(활동이 실제로 있었던 경우만 센다). 중복 증가는 상태 전이가 막는다: 두 호출 지점 모두
+    // CONFIRMED 상태만 대상으로 하고 end() 뒤에는 ENDED가 되어 다시 대상이 되지 않으며, 두 경로는 matching_mutex로 직렬화된다.
+    private void endAndCountCompletion(ActivityMatch activityMatch, MatchParticipant host, MatchParticipant applicant) {
+        activityMatch.end();
+        incrementCompletedActivityCount(host.getUserId());
+        incrementCompletedActivityCount(applicant.getUserId());
+    }
+
+    // 후기·노쇼 신고 반영(ActivityFeedbackService)과 같은 upsert 패턴 — trust_profile 행이 없는 사용자도 한 문장으로
+    // 원자적으로 처리해 PK 충돌 없이 행을 만든다. 후기가 없는 새 행의 별점은 NULL이다(V16).
+    // trust_profile은 소유 도메인이 정해지지 않아 매칭 도메인이 임시로 다루고 있으며(V7), 지금까지처럼 JdbcTemplate을 쓴다.
+    private void incrementCompletedActivityCount(Long userId) {
+        jdbcTemplate.update("""
+                INSERT INTO trust_profile (user_id, completed_activity_count)
+                VALUES (?, 1)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    completed_activity_count = trust_profile.completed_activity_count + 1,
+                    updated_at = now()
+                """, userId);
     }
 
     // expireOverdue()/endOverdueActivities()가 공통으로 쓰는 slot(A=호스트/B=신청자) 조회.
