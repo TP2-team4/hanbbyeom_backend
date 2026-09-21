@@ -31,7 +31,8 @@ public class AuthController {
     // 회원가입: POST /api/auth/signup
     @Operation(
             summary = "회원가입",
-            description = "이메일 인증을 완료한 사용자를 가입 처리하고 생성된 사용자 정보를 반환합니다."
+            description = "이메일 인증을 완료한 사용자를 가입 처리하고 생성된 사용자 정보를 반환합니다. "
+                    + "이미 가입된 이메일이면 409이고, 입력값이 형식·길이 규칙을 어기면 400입니다."
     )
     @PostMapping("/signup")
     // AuthService에게 request(회원가입 요청 데이터)를 넘겨서 회원가입을 처리시키고,
