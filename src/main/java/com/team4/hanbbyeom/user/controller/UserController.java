@@ -101,8 +101,8 @@ public class UserController {
     }
 
     // 내 신뢰도 프로필 조회: GET /api/users/me/trust-profile
-    // 실제 조회 로직은 TrustProfileLookupService가 이미 갖고 있다 — 지금까지는
-    // 호스트/신청자 프로필 조회(다른 사람 대상)에서만 쓰였는데, 본인 조회용 경로가 없었다.
+    // 조회 로직은 TrustProfileLookupService 재사용
+    // 기존에는 호스트/신청자 프로필 조회(다른 사람 대상)에만 쓰여 본인 조회용 경로 부재
     @Operation(
             summary = "내 신뢰도 프로필 조회",
             description = "인증된 사용자 본인의 평균 별점·완료한 활동·노쇼 신고 횟수를 조회합니다. "
