@@ -35,8 +35,6 @@ public record SignUpRequest(
                 example = "password1234")
         String password,
 
-        // 검증 실패 시 GlobalExceptionHandler가 첫 필드 오류의 메시지를 그대로 응답하므로 한글 메시지를 지정한다.
-        // 닉네임 변경(UserNicknameUpdateRequest)과 같은 규칙·같은 메시지를 쓴다(UserNicknameIntegrationTest가 일치를 검증)
         @NotBlank(message = "닉네임을 입력해주세요.")
         @Size(min = 2, max = 16, message = "닉네임은 2자 이상 16자 이하로 입력해주세요.") // 서비스 정책상 좁게 제한, DB(50자)는 향후 정책 변경 대비 여유값이라 DTO보다 넉넉
         @Schema(description = "서비스에서 표시할 닉네임 (2자 이상 16자 이하)", example = "한뼘러너")
