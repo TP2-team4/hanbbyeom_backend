@@ -179,7 +179,7 @@ class MatchRequestCommandServiceTest {
         OffsetDateTime before = post.getScheduledAt();
 
         assertThatThrownBy(() -> service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT")))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(MatchRequestNotSearchingException.class);
 
         assertThat(post.getScheduledAt()).isEqualTo(before);
         assertThat(post.getStatus()).isEqualTo(MatchRequestStatus.PENDING_CONFIRMATION);

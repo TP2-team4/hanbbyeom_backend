@@ -153,7 +153,7 @@ class MatchingEditPathsLockTest {
             return null;
         });
 
-        assertThat(result).isInstanceOf(IllegalStateException.class);
+        assertThat(result).isInstanceOf(MatchRequestNotSearchingException.class);
         assertThat(postStatus()).isEqualTo("PENDING_CONFIRMATION"); // 낡은 SEARCHING으로 되돌아가지 않는다
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT EXTRACT(EPOCH FROM scheduled_at)::float8 FROM match_request WHERE id = ?", Double.class, postId))
@@ -169,7 +169,7 @@ class MatchingEditPathsLockTest {
             return null;
         });
 
-        assertThat(result).isInstanceOf(IllegalStateException.class);
+        assertThat(result).isInstanceOf(MatchRequestNotSearchingException.class);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT meeting_point FROM run_match_condition WHERE match_request_id = ?", String.class, postId))
                 .isEqualTo("뚝섬유원지역 3번 출구");

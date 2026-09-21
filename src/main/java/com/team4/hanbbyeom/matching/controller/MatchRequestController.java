@@ -97,7 +97,8 @@ public class MatchRequestController {
     // 있다. 코스/거리/페이스/만나는 곳은 이 API로 못 바꾸며 별도 API(러닝 조건 수정) 담당이다.
     @Operation(summary = "모집글 수정",
             description = "일정과 대화 수준만 수정합니다. 코스·거리·페이스·만나는 곳은 러닝 조건 수정 API가 담당하며, " +
-                    "모집 중(SEARCHING) 상태일 때만 수정할 수 있습니다.")
+                    "모집 중(SEARCHING) 상태일 때만 수정할 수 있으며, 이미 신청이 들어왔거나 확정·취소·만료된 글이면 409가 " +
+                    "반환됩니다. 일정이 너무 임박하는 등 입력값이 잘못되면 400입니다.")
     @PatchMapping("/{id}")
     public ResponseEntity<Void> update(
             @PathVariable Long id,

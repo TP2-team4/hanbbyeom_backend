@@ -84,7 +84,8 @@ public class MatchRequestCommandService {
 
     // 일정(scheduledAt)·대화 수준만 수정한다 — 코스/거리/페이스/만나는 곳은 RunConditionService
     // (팀원 B) 담당이라 여기서 다루지 않는다. 상태 전이는 없고(SEARCHING 유지), SEARCHING이
-    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 IllegalStateException을 던진다.
+    // 아닌 글을 수정하려 하면 MatchRequest.changeConditions()가 MatchRequestNotSearchingException(409)을 던진다
+    // (취소·러닝 조건 삭제와 같은 "지금 상태에서는 불가능"이라는 거절이라 400이 아니라 409다).
     //
     // 신청·수락·거절·취소·탈퇴 정리와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 이 메서드가 게시글을 읽은 뒤
     // apply()가 게시글을 PENDING_CONFIRMATION으로 바꿔 커밋했을 때, 낡은 SEARCHING으로 상태 검사를 통과하고 커밋 시점에
