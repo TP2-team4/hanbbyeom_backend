@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.auth.service;
 
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
+import com.team4.hanbbyeom.auth.exception.EmailVerificationFailedException;
 import com.team4.hanbbyeom.auth.exception.PasswordResetAuthenticationException;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
@@ -303,7 +304,7 @@ public class EmailVerificationService {
 
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             // 해시 알고리즘을 사용할 수 없거나 비밀키 형식이 잘못된 경우 발생하는 예외
-            throw new IllegalStateException("해시 알고리즘을 사용할 수 없습니다.", e);
+            throw new EmailVerificationFailedException("해시 알고리즘을 사용할 수 없습니다.", e);
         }
     }
 
@@ -374,7 +375,7 @@ public class EmailVerificationService {
 
         } catch (MessagingException e) {
             // 메일 메시지를 구성하는 과정에서 문제가 발생하면 처리
-            throw new IllegalStateException("인증 메일 발송에 실패했습니다.", e);
+            throw new EmailVerificationFailedException("인증 메일 발송에 실패했습니다.", e);
         }
     }
 
