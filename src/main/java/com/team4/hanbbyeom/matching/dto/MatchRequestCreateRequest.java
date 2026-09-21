@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.matching.dto;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.time.OffsetDateTime;
 
@@ -11,11 +12,14 @@ import java.time.OffsetDateTime;
 // 코스·만나는 곳·거리·페이스 6개는 RunConditionService.create()로 그대로 넘어가는데, 그쪽 요청 DTO는 서비스가 직접 만들어
 // 호출해서 어노테이션이 실행되지 않는다. 그래서 여기서 RunConditionCreateRequest와 같은 기준으로 검증한다.
 // 거리·페이스의 범위(1~20km, 5'00"~7'30", min <= max)는 RunConditionService가 계속 검증한다.
+// meetingPoint의 상한 255는 run_match_condition.meeting_point와 activity_match.location(확정 시 복사)이 모두 VARCHAR(255)라서다.
+// 검증이 없으면 256자부터 INSERT가 "value too long"으로 실패해 500이 된다. 상한은 바이트가 아니라 문자 수다(Postgres VARCHAR(n) 기준).
 // message는 응답에 그대로 나가는데 필드 이름이 함께 나가지 않아서, 어느 값이 문제인지 알 수 있는 문구로 쓴다.
 public record MatchRequestCreateRequest(
         @NotNull(message = "코스를 선택해주세요.")
         Long courseId,             // running_course.id
         @NotBlank(message = "만나는 곳을 입력해주세요.")
+        @Size(max = 255, message = "만나는 곳은 255자 이하로 입력해주세요.")
         String meetingPoint,
         @NotNull(message = "최소 거리를 입력해주세요.")
         Integer distanceMinMeters,

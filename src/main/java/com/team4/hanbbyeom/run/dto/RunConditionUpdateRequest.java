@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.run.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 // 러닝 조건 수정 요청 DTO
 // API 클라이언트(프론트엔드)로부터 전달받은 러닝 조건 수정 요청 데이터를 담는 객체
@@ -17,7 +18,9 @@ public record RunConditionUpdateRequest(
 
         // 사용자가 직접 입력한 상세 집결 장소 (필수)
         // null, 빈 문자열(""), 공백(" ") 모두 허용하지 않습니다.
+        // 255자 이하(문자 수 기준): meeting_point 컬럼이 VARCHAR(255)라 넘으면 INSERT/UPDATE가 실패해 500이 된다.
         @NotBlank
+        @Size(max = 255, message = "만나는 곳은 255자 이하로 입력해주세요.")
         String meetingPoint,
 
         // 희망 러닝 최소거리 (미터 단위, 필수)
