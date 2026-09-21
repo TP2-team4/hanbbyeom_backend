@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching.dto;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import java.util.Arrays;
 
 // 모집 탭 목록(GET /api/matching/board)의 정렬 옵션 (이슈 #123).
@@ -20,7 +21,7 @@ public enum BoardSort {
         return Arrays.stream(values())
                 .filter(sort -> sort.name().equalsIgnoreCase(value))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
+                .orElseThrow(() -> new InvalidRequestValueException(
                         "sort는 LATEST, SCHEDULED, DISTANCE 중 하나여야 합니다."));
     }
 }

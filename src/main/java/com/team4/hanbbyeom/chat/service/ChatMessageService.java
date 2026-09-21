@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.chat.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.chat.domain.ChatMessage;
 import com.team4.hanbbyeom.chat.dto.ChatListItemResponse;
 import com.team4.hanbbyeom.chat.dto.ChatMessageResponse;
@@ -56,7 +57,7 @@ public class ChatMessageService {
 
     public List<ChatMessageResponse> getMessages(Long currentUserId, Long activityMatchId, long afterId) {
         if (afterId < 0) {
-            throw new IllegalArgumentException("afterId는 0 이상이어야 합니다.");
+            throw new InvalidRequestValueException("afterId는 0 이상이어야 합니다.");
         }
 
         ActivityMatch activityMatch = getActivityMatch(activityMatchId);

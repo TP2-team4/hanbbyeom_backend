@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.service;
 
+import com.team4.hanbbyeom.global.exception.InvalidRequestValueException;
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.dto.PasswordResetRequest;
@@ -353,8 +354,8 @@ class PasswordResetServiceTest {
                 FIXED_NOW.minusSeconds(60)
         );
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        InvalidRequestValueException exception = assertThrows(
+                InvalidRequestValueException.class,
                 () -> passwordResetService.resetPassword(
                         재설정_요청(email, VERIFICATION_CODE, CURRENT_PASSWORD)
                 )
