@@ -184,7 +184,7 @@ class ExpireOverdueRequestsIntegrationTest {
         Long courseId = jdbcTemplate.queryForObject(
                 "SELECT id FROM running_course WHERE name = ? LIMIT 1", Long.class, "뚝섬 한강공원");
         Long newPostId = matchRequestCommandService.create(host, new MatchRequestCreateRequest(
-                courseId, "새 장소", 5000, 8000, 360, 400, OffsetDateTime.now().plusHours(48), "LIGHT_CHAT"));
+                courseId, "새 장소", 5000, 8000, 360, 400, OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT));
 
         assertThat(newPostId).isNotEqualTo(stale);
         assertThat(statusOf(newPostId)).isEqualTo("SEARCHING");

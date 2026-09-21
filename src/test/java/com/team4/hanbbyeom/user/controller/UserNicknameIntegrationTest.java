@@ -140,6 +140,19 @@ class UserNicknameIntegrationTest {
         assertThat(storedNickname(user.getId())).isEqualTo("기존닉네임");
     }
 
+    // NUL 문자(0x00)는 PostgreSQL이 저장하지 못해 DB 단계에서 500이 났다. 값은 JSON 이스케이프 문자열로 넘긴다
+    @Test
+    @DisplayName("NUL 문자가 있는 닉네임은 400으로 거부하고 기존 닉네임을 유지한다")
+    void NUL_문자가_있으면_400을_반환한다() throws Exception {
+        User user = createUser("기존닉네임");
+
+        changeNickname(bearerToken(user.getId()), "a\\u0000b")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("닉네임에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(storedNickname(user.getId())).isEqualTo("기존닉네임");
+    }
+
     @Test
     @DisplayName("공백뿐이거나 비어 있거나 누락된 닉네임은 400으로 거부하고 기존 닉네임을 유지한다")
     void 공백_빈값_누락은_400을_반환한다() throws Exception {

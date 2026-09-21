@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.chat.dto;
 
+import com.team4.hanbbyeom.global.validation.NoNulCharacter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -11,6 +12,7 @@ public record ChatMessageSendRequest(
         @Schema(description = "메시지 내용", example = "2번 출구 앞에 도착했어요.", maxLength = 100)
         @NotBlank(message = "메시지를 입력해주세요.")
         @Size(max = 100, message = "메시지는 100자 이하여야 합니다.")
+        @NoNulCharacter(message = "메시지에 사용할 수 없는 문자가 포함되어 있어요.")
         String content
 ) {
 }

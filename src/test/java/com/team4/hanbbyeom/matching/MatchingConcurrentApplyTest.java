@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
+import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
@@ -98,7 +99,7 @@ class MatchingConcurrentApplyTest {
         // 여기서 create()는 그 자체로 @Transactional이라 즉시 커밋된다 — 이후 별도 스레드에서도 바로 보임
         hostRequestId = matchRequestCommandService.create(hostUserId, new MatchRequestCreateRequest(
                 courseId, "동시경합 테스트 장소", 5000, 8000, 360, 400,
-                OffsetDateTime.now().plusHours(48), "LIGHT_CHAT"
+                OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT
         ));
 
         CountDownLatch ready = new CountDownLatch(2);

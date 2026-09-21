@@ -130,6 +130,17 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("닉네임을 입력해주세요."));
     }
 
+    // NUL 문자(0x00)는 PostgreSQL이 저장하지 못해 DB 단계에서 500이 났다. 검증은 Controller 단계에서 끝난다
+    @Test
+    @DisplayName("닉네임에 NUL 문자가 있으면 한글 메시지와 함께 400")
+    void signUp_닉네임에_NUL_문자가_있으면_400() throws Exception {
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signUpBody("a\\u0000b")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("닉네임에 사용할 수 없는 문자가 포함되어 있어요."));
+    }
+
     // 닉네임만 바꿔 끼우는 가입 요청 바디 (나머지 필드는 검증을 통과하는 값)
     private String signUpBody(String nickname) {
         return """

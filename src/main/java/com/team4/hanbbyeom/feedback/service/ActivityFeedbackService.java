@@ -9,6 +9,7 @@ import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
 import com.team4.hanbbyeom.feedback.repository.ActivityReviewRepository;
 import com.team4.hanbbyeom.feedback.repository.NoShowReportRepository;
+import com.team4.hanbbyeom.global.persistence.UniqueViolations;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
@@ -85,6 +86,12 @@ public class ActivityFeedbackService {
                     request.rating(), request.perceivedTalkLevel(), request.comment()
             ));
         } catch (DataIntegrityViolationException e) {
+            // uq_activity_review_once 유니크 위반(SQLState 23505)만 "이미 제출함"이다. Spring은 값이 너무 길거나(22001)
+            // 잘못된 바이트(22021, NUL 등) 같은 데이터 오류와 다른 제약 위반도 같은 예외로 번역하므로, 전부 409로 바꾸면
+            // 실제 원인이 "이미 제출했어요"로 가려진다. 그 밖의 오류는 그대로 던져 500으로 드러낸다.
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 
@@ -109,6 +116,10 @@ public class ActivityFeedbackService {
                     request.reason(), request.detail()
             ));
         } catch (DataIntegrityViolationException e) {
+            // uq_no_show_report_once 유니크 위반(23505)만 409로 바꾼다(submitReview()와 같은 이유)
+            if (!UniqueViolations.isUniqueViolation(e)) {
+                throw e;
+            }
             throw new FeedbackAlreadySubmittedException("이미 이 활동에 대한 후기 또는 신고를 제출했어요.");
         }
 

@@ -145,7 +145,7 @@ class MatchApplyServiceTest {
     void 최소_리드타임으로_등록해도_등록_직후_바로_신청할_수_있다() {
         MatchRequestCreateRequest sameDayRequest = new MatchRequestCreateRequest(
                 courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                OffsetDateTime.now().plusHours(3).plusMinutes(5), "SILENT" // MIN_LEAD_HOURS(3시간) 경계에 너무 딱 붙지 않게 여유를 둔다
+                OffsetDateTime.now().plusHours(3).plusMinutes(5), TalkLevel.SILENT // MIN_LEAD_HOURS(3시간) 경계에 너무 딱 붙지 않게 여유를 둔다
         );
         Long newHostUserId = createUser("host-sameday");
         Long newHostRequestId = matchRequestCommandService.create(newHostUserId, sameDayRequest);
@@ -166,7 +166,7 @@ class MatchApplyServiceTest {
     void 예전에_죽은_구간이었던_리드타임도_등록과_신청이_모두_성공한다() {
         MatchRequestCreateRequest deadZoneRequest = new MatchRequestCreateRequest(
                 courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                OffsetDateTime.now().plusHours(10), "SILENT"
+                OffsetDateTime.now().plusHours(10), TalkLevel.SILENT
         );
         Long newHostUserId = createUser("host-deadzone");
         Long newHostRequestId = matchRequestCommandService.create(newHostUserId, deadZoneRequest);
@@ -187,7 +187,7 @@ class MatchApplyServiceTest {
         OffsetDateTime scheduledAt = OffsetDateTime.now().plusHours(3).plusMinutes(5);
         MatchRequestCreateRequest sameDayRequest = new MatchRequestCreateRequest(
                 courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                scheduledAt, "SILENT"
+                scheduledAt, TalkLevel.SILENT
         );
         Long newHostUserId = createUser("host-shortwindow");
         Long newHostRequestId = matchRequestCommandService.create(newHostUserId, sameDayRequest);
@@ -207,7 +207,7 @@ class MatchApplyServiceTest {
         OffsetDateTime scheduledAt = now.plusHours(200);
         MatchRequestCreateRequest farAwayRequest = new MatchRequestCreateRequest(
                 courseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400,
-                scheduledAt, "SILENT"
+                scheduledAt, TalkLevel.SILENT
         );
         Long newHostUserId = createUser("host-fullwindow");
         Long newHostRequestId = matchRequestCommandService.create(newHostUserId, farAwayRequest);

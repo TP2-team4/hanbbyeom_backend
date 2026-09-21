@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.user.dto;
 
+import com.team4.hanbbyeom.global.validation.NoNulCharacter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -14,6 +15,7 @@ public record UserNicknameUpdateRequest(
         // 검증 실패 시 GlobalExceptionHandler가 첫 필드 오류의 메시지를 그대로 응답하므로 한글 메시지 지정
         @NotBlank(message = "닉네임을 입력해주세요.")
         @Size(min = 2, max = 16, message = "닉네임은 2자 이상 16자 이하로 입력해주세요.")
+        @NoNulCharacter(message = "닉네임에 사용할 수 없는 문자가 포함되어 있어요.")
         @Schema(description = "변경할 닉네임 (2자 이상 16자 이하). 회원가입과 같은 규칙이며 다른 사용자와 중복될 수 있습니다.",
                 example = "한뼘러너")
         String nickname

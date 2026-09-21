@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching;
 
+import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.service.MatchApplyService;
@@ -85,7 +86,7 @@ class MatchRequestCancelConcurrentTest {
         for (int round = 0; round < ROUNDS; round++) {
             Long requestId = matchRequestCommandService.create(hostId, new MatchRequestCreateRequest(
                     courseId, "취소 경합 테스트 장소", 5000, 8000, 360, 400,
-                    OffsetDateTime.now().plusHours(48), "LIGHT_CHAT"));
+                    OffsetDateTime.now().plusHours(48), TalkLevel.LIGHT_CHAT));
             createdRequestIds.add(requestId);
 
             AtomicReference<Object> applyResult = new AtomicReference<>();
