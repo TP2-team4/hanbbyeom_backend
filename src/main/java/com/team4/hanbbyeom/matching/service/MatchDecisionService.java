@@ -265,6 +265,44 @@ public class MatchDecisionService {
         }
     }
 
+    // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 모집 기한(search_expires_at)이 지난 모집 중(SEARCHING)
+    // 게시글을 자동 만료(EXPIRED) 처리한다(이슈 #107). V3에 설계되어 있지만 구현되지 않았던 동작이다:
+    // search_expires_at은 "이 시각이 지나면 스케줄러가 EXPIRED로 전환한다"는 마감 기한인데, 계산해서 저장만 하고
+    // 어디서도 쓰이지 않아 기한이 지난 글이 계속 SEARCHING으로 남았다. 그러면 모집 탭에 계속 노출되고(신청은
+    // apply()의 응답 기한 계산에 걸려 거부된다), 활성 게시글은 사용자당 하나뿐(uq_match_request_active_user)이라
+    // 호스트가 직접 취소하기 전에는 새 글을 올릴 수 없었다. EXPIRED는 그 유니크 인덱스 대상이 아니라 호스트가 풀린다.
+    //
+    // 기준은 scheduled_at이 아니라 search_expires_at(= scheduled_at - 1시간)이다. apply()가 신청을 거부하는 시점
+    // (활동 시작 1시간 전, decisionExpiresAt이 now 이후가 아닐 때)과 같아서, "신청할 수 없는 글은 마감된 글"로 일치한다.
+    // 경계는 포함(search_expires_at <= now)이다.
+    //
+    // 대상은 SEARCHING뿐이다. PENDING_CONFIRMATION은 응답 기한 처리(expireOverdue())가, MATCHED는 종료 처리
+    // (endOverdueActivities())가 담당한다. 신청 대기가 만료돼 SEARCHING으로 복귀한 글도 이미 기한이 지났다면
+    // 다음 실행에서 이 메서드가 정리한다.
+    //
+    // 다른 상태 전이와 같이 matching_mutex 락을 먼저 잡아 신청·취소·수락과 순서를 직렬화한다. 락을 잡은 뒤에
+    // 갱신하므로 이미 커밋된 신청·취소의 결과를 정확히 본다. 한 문장의 일괄 UPDATE라 배포 직후 첫 실행에서 쌓여 있던
+    // 지난 글을 한꺼번에 처리해도 부담이 없고, 여러 번 실행해도 결과가 같다(멱등). 만료된 건수를 반환한다.
+    @Transactional
+    public int expireOverdueRequests() {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        int expiredCount = jdbcTemplate.update(
+                """
+                UPDATE match_request
+                SET status = 'EXPIRED', updated_at = ?
+                WHERE status = 'SEARCHING' AND search_expires_at <= ?
+                """,
+                now, now
+        );
+
+        if (expiredCount > 0) {
+            log.info("모집 기한이 지난 게시글 {}건을 만료(EXPIRED) 처리했습니다.", expiredCount);
+        }
+        return expiredCount;
+    }
+
     // 스케줄러(MatchExpireScheduler)가 주기적으로 호출 — 확정(CONFIRMED)된 활동 중
     // 예정 종료 시각(scheduled_end_at)이 지난 건들을 ENDED로 자연 종료 처리한다.
     // ⚠️ 이게 없으면 CONFIRMED로 끝난 매칭의 두 참가자는 released_at이 영원히 안 채워져서
