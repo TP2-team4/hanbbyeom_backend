@@ -22,8 +22,8 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     // match_request 하나당 코스명/거리/페이스(run_match_condition, running_course)와 작성자
     // 닉네임·신뢰도(users, trust_profile)까지 한 번에 조인해서 화면에 필요한 걸 통째로 가져온다
     // — N+1 없이 목록 화면 하나를 한 번의 쿼리로 채우려는 목적. trust_profile은 아직 활동 이력이
-    // 없는 신규 유저면 행 자체가 없을 수 있어 LEFT JOIN. 그 경우 rating은 null("평가 없음")
-    // 횟수 두 개는COALESCE로 0 — 프로필 조회 API(TrustProfileLookupService.lookup())와 같은 규칙 (이슈 #94).
+    // 없는 신규 유저면 행 자체가 없을 수 있어 LEFT JOIN. 그 경우 rating은 null("평가 없음"),
+    // 횟수 두 개는 COALESCE로 0 — 프로필 조회 API(TrustProfileLookupService.lookup())와 같은 규칙 (이슈 #94).
     // 최근 후기 1건은 LEFT JOIN LATERAL로 가져온다 — 작성자(reviewee_user_id)가 받은 후기 중
     // created_at DESC, id DESC(동시각 타이브레이커)로 첫 행. V15 복합 인덱스
     // (reviewee_user_id, created_at DESC, id DESC)가 이 정렬 순서와 정확히 일치해서 정렬 없이

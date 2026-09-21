@@ -12,7 +12,6 @@ import com.team4.hanbbyeom.feedback.repository.NoShowReportRepository;
 import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchParticipant;
-import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.exception.ActivityMatchNotFoundException;
 import com.team4.hanbbyeom.matching.exception.NotMatchParticipantException;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
