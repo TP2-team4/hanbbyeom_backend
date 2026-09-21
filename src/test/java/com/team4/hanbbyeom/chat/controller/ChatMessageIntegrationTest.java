@@ -263,6 +263,23 @@ class ChatMessageIntegrationTest {
                 .andExpect(jsonPath("$.message").value("메시지는 100자 이하여야 합니다."));
     }
 
+    // NUL 문자(0x00)는 PostgreSQL이 저장하지 못해 DB 단계에서 500이 났다. 값은 JSON 이스케이프 문자열로 넘긴다
+    @Test
+    @DisplayName("NUL 문자가 있는 메시지는 400이고 저장되지 않는다")
+    void NUL_문자_메시지_거부() throws Exception {
+        TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
+
+        mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(match.hostId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\": \"a\\u0000b\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("메시지에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM chat_message WHERE activity_match_id = ?", Integer.class, match.activityMatchId())).isZero();
+    }
+
     @Test
     @DisplayName("음수 afterId 조회 요청은 400")
     void 음수_afterId_거부() throws Exception {

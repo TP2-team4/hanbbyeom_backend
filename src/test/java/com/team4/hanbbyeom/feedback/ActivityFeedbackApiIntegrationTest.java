@@ -262,4 +262,40 @@ public class ActivityFeedbackApiIntegrationTest {
                 "SELECT updated_at FROM trust_profile WHERE user_id = ?", OffsetDateTime.class, userBId);
         assertThat(updatedAt).isAfter(staleUpdatedAt);
     }
+
+    // 8. NUL 문자(0x00)는 PostgreSQL이 저장하지 못한다. 예전에는 DB 단계에서 실패한 예외를 넓은 catch가 "이미 제출했어요"
+    //    (409)로 잘못 안내했다. DTO 검증이 미리 400으로 거절하고, 아무것도 저장·반영되지 않아야 한다.
+    private static final String NUL = String.valueOf((char) 0);
+
+    @Test
+    void 후기_한줄평에_NUL_문자가_있으면_400이고_저장되지_않는다() throws Exception {
+        ReviewCreateRequest request = new ReviewCreateRequest(5, TalkLevel.SILENT, "좋았" + NUL + "어요");
+
+        mockMvc.perform(post("/api/matching/matches/{id}/review", endedActivityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(userAId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("후기에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM activity_review WHERE activity_match_id = ?", Integer.class, endedActivityMatchId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM trust_profile WHERE user_id = ?", Integer.class, userBId)).isZero();
+    }
+
+    @Test
+    void 노쇼_신고_상세에_NUL_문자가_있으면_400이고_저장되지_않는다() throws Exception {
+        NoShowReportCreateRequest request = new NoShowReportCreateRequest(NoShowReason.OTHER, "연락이 " + NUL + "없었어요");
+
+        mockMvc.perform(post("/api/matching/matches/{id}/no-show-report", endedActivityMatchId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(userAId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("상세 내용에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM no_show_report WHERE activity_match_id = ?", Integer.class, endedActivityMatchId)).isZero();
+    }
 }
