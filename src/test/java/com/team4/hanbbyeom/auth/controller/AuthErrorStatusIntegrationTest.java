@@ -8,6 +8,8 @@ import com.team4.hanbbyeom.user.domain.User;
 import com.team4.hanbbyeom.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -223,6 +225,37 @@ class AuthErrorStatusIntegrationTest {
     void 이메일_길이_초과_확인_요청_400() throws Exception {
         // 검증이 없으면 길이 초과가 그대로 서비스까지 가서 "발송 내역 없음" 409로 나간다
         confirmCode(TOO_LONG_EMAIL, VerificationPurpose.SIGNUP, ANY_CODE)
+                .andExpect(status().isBadRequest());
+    }
+
+    // 이메일이 누락되거나 null·빈 문자열이면 @Email은 통과시킨다(null·빈 값은 유효로 본다). 그 값이 서비스까지 가면
+    // EmailNormalizer.normalize()의 email.trim()에서 NullPointerException으로 500이 나므로, DTO의 @NotBlank가 유일한 방어선이다.
+    // 두 인증 요청 모두 그 방어선을 고정한다
+    private static String emailField(String kind) {
+        return switch (kind) {
+            case "MISSING" -> "";
+            case "NULL" -> "\"email\": null, ";
+            default -> "\"email\": \"\", ";
+        };
+    }
+
+    @ParameterizedTest(name = "이메일이 {0}이면 인증 코드 발송 요청은 400")
+    @ValueSource(strings = {"MISSING", "NULL", "EMPTY"})
+    @DisplayName("이메일이 누락·null·빈 문자열이면 인증 코드 발송 요청은 400")
+    void 이메일이_비어_있으면_발송_요청은_400(String kind) throws Exception {
+        mockMvc.perform(post("/api/auth/email-verifications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + emailField(kind) + "\"purpose\": \"SIGNUP\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest(name = "이메일이 {0}이면 인증 코드 확인 요청은 400")
+    @ValueSource(strings = {"MISSING", "NULL", "EMPTY"})
+    @DisplayName("이메일이 누락·null·빈 문자열이면 인증 코드 확인 요청은 400")
+    void 이메일이_비어_있으면_확인_요청은_400(String kind) throws Exception {
+        mockMvc.perform(post("/api/auth/email-verifications/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + emailField(kind) + "\"purpose\": \"SIGNUP\", \"code\": \"123456\"}"))
                 .andExpect(status().isBadRequest());
     }
 
