@@ -246,7 +246,14 @@ public class MatchApplyService {
                 row.getDistanceMaxMeters(),
                 row.getScheduledAt().atOffset(ZoneOffset.UTC),
                 row.getTalkLevel(),
-                new MatchBoardItemResponse.AuthorSummary(row.getHostNickname(), row.getHostRating(), row.getHostCompletedCount())
+                new MatchBoardItemResponse.AuthorSummary(
+                        row.getHostNickname(),
+                        row.getHostRating(),
+                        row.getHostCompletedCount(),
+                        row.getHostNoShowCount(),
+                        MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                )
         );
     }
 

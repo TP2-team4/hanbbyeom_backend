@@ -44,6 +44,9 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
     // run_match_condition/running_course를 다시 조인할 필요가 없다 — 호스트 닉네임·신뢰도만
     // slot='A' 참가자를 거쳐 조인한다. 상태(PENDING/ACCEPTED/REJECTED/CANCELLED) 매핑과 상태
     // 필터링은 Service(MatchApplyService)가 closedByUserId까지 보고 판단한다.
+    // 호스트의 노쇼횟수·최근후기는 모집 탭 목록(MatchRequestRepository.searchBoard)과 같은 방식으로
+    // 조인한다 — 세 화면(목록/상세/내 신청 내역)이 같은 AuthorSummary를 쓰는데 이 화면만 비어
+    // 보이는 불일치를 막기 위함 (이슈 #70).
     @Query(value = """
         SELECT am.id AS id,
                am.status AS status,
@@ -56,12 +59,22 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
                host.match_request_id AS hostMatchRequestId,
                u.nickname AS hostNickname,
                tp.average_rating AS hostRating,
-               tp.completed_activity_count AS hostCompletedCount
+               tp.completed_activity_count AS hostCompletedCount,
+               tp.no_show_report_count AS hostNoShowCount,
+               latest_review.comment AS latestReviewComment,
+               latest_review.created_at AS latestReviewCreatedAt
         FROM match_participant applicant
         JOIN activity_match am ON am.id = applicant.activity_match_id
         JOIN match_participant host ON host.activity_match_id = am.id AND host.slot = 'A'
         JOIN users u ON u.id = host.user_id
         LEFT JOIN trust_profile tp ON tp.user_id = host.user_id
+        LEFT JOIN LATERAL (
+            SELECT ar.comment, ar.created_at
+            FROM activity_review ar
+            WHERE ar.reviewee_user_id = host.user_id
+            ORDER BY ar.created_at DESC, ar.id DESC
+            LIMIT 1
+        ) latest_review ON true
         WHERE applicant.slot = 'B' AND applicant.user_id = :applicantUserId
         ORDER BY am.created_at DESC
         """, nativeQuery = true)
@@ -82,6 +95,9 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
         String getHostNickname();
         Double getHostRating();
         Integer getHostCompletedCount();
+        Integer getHostNoShowCount();
+        String getLatestReviewComment();
+        Instant getLatestReviewCreatedAt();
     }
 
     // 내 활동 이력 목록(GET /api/matching/matches)용 조회. 채팅 목록(ChatMessageRepository.findChatListByUserId)과

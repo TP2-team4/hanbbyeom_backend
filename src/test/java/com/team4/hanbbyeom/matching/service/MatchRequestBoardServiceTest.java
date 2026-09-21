@@ -1,5 +1,8 @@
 package com.team4.hanbbyeom.matching.service;
 
+import com.team4.hanbbyeom.matching.domain.AcceptStatus;
+import com.team4.hanbbyeom.matching.domain.ActivityMatch;
+import com.team4.hanbbyeom.matching.domain.MatchParticipant;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
@@ -8,6 +11,8 @@ import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
 import com.team4.hanbbyeom.matching.exception.PendingApplicationNotFoundException;
+import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
+import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +37,10 @@ class MatchRequestBoardServiceTest {
     private MatchRequestRepository matchRequestRepository;
     @Autowired
     private MatchApplyService matchApplyService;
+    @Autowired
+    private ActivityMatchRepository activityMatchRepository;
+    @Autowired
+    private MatchParticipantRepository matchParticipantRepository;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -73,9 +82,60 @@ class MatchRequestBoardServiceTest {
         );
 
         jdbcTemplate.update(
-                "INSERT INTO trust_profile (user_id, average_rating, completed_activity_count) VALUES (?, ?, ?)",
-                testUserId, 4.5, 12
+                "INSERT INTO trust_profile (user_id, average_rating, completed_activity_count, no_show_report_count) VALUES (?, ?, ?, ?)",
+                testUserId, 4.5, 12, 2
         );
+    }
+
+    private Long createUser(String label) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO users (email, password_hash, nickname, email_verified_at) VALUES (?, ?, ?, ?) RETURNING id",
+                Long.class,
+                label + "-" + System.nanoTime() + "@example.com", "dummy-hash", label, OffsetDateTime.now()
+        );
+    }
+
+    private void giveReviewToTestUser(String comment) {
+        giveReviewToTestUser(comment, OffsetDateTime.now());
+    }
+
+    // testUserId(모집글 작성자)가 후기를 "받는" 상황을 만든다 — 새 리뷰어와 끝난 매칭을 하나 만들고,
+    // 그 매칭에서 리뷰어가 testUserId에게 후기를 남긴 것으로 activity_review를 직접 INSERT한다.
+    // activity_review는 (activity_match_id, reviewer/reviewee_user_id)가 match_participant를 참조하는
+    // 복합 FK가 있어서 참가자 등록이 먼저 필요하다. 참가 행의 match_request_id는 V11부터 nullable이라
+    // 별도 게시글 없이 null로 둔다.
+    // 두 번 이상 호출할 수 있도록(후기 2건으로 "최신순" 검증) 참가 행은 만들자마자 release()한다 —
+    // 활성(released_at IS NULL) 참가 행은 사용자당 1개만 허용되기 때문(uq_participant_active_user).
+    // 해제가 다음 INSERT보다 먼저 반영되도록 saveAndFlush()를 쓴다(같은 플러시에서 INSERT가 UPDATE보다 앞선다).
+    // created_at은 명시적으로 넣는다 — 같은 트랜잭션 안의 now()는 전부 같은 값이라 순서를 가를 수 없다.
+    private void giveReviewToTestUser(String comment, OffsetDateTime createdAt) {
+        Long reviewerId = createUser("리뷰어");
+
+        OffsetDateTime base = OffsetDateTime.now().minusHours(2);
+        ActivityMatch activityMatch = new ActivityMatch(
+                base.plusMinutes(20), base.plusMinutes(30), TalkLevel.SILENT,
+                "뚝섬 한강공원", "뚝섬 한강공원 코스", 5000, 12000,
+                "뚝섬유원지역 3번 출구", 360, 400,
+                base.plusMinutes(10), base
+        );
+        activityMatch.confirm("123456");
+        activityMatch.end();
+        Long activityMatchId = activityMatchRepository.save(activityMatch).getId();
+
+        MatchParticipant authorSide = matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, null, testUserId, "A", AcceptStatus.ACCEPTED));
+        MatchParticipant reviewerSide = matchParticipantRepository.save(
+                new MatchParticipant(activityMatchId, null, reviewerId, "B", AcceptStatus.ACCEPTED));
+        authorSide.release();
+        reviewerSide.release();
+        matchParticipantRepository.saveAndFlush(authorSide);
+        matchParticipantRepository.saveAndFlush(reviewerSide);
+
+        jdbcTemplate.update("""
+                INSERT INTO activity_review
+                    (activity_match_id, reviewer_user_id, reviewee_user_id, rating, perceived_talk_level, comment, created_at)
+                VALUES (?, ?, ?, 5, 'SILENT', ?, ?)
+                """, activityMatchId, reviewerId, testUserId, comment, createdAt);
     }
 
     @Test
@@ -135,6 +195,78 @@ class MatchRequestBoardServiceTest {
         assertThat(response.distanceMinMeters()).isEqualTo(5000);
         assertThat(response.distanceMaxMeters()).isEqualTo(8000);
         assertThat(response.isOwner()).isTrue();
+    }
+
+    // 이슈 #70 완료 기준: 목록(getBoard)과 상세(getDetail)가 작성자 신뢰 정보를 "같은 값"으로 내려줘야 한다.
+    // 상세는 이전에 AuthorSummary(nickname, null, null)로 하드코딩되어 있어서 이 테스트가 없었으면
+    // 그 버그가 그대로 남았을 것이다. 후기가 없는 상태에서는 latestReview가 양쪽 모두 null이어야 한다.
+    @Test
+    void 목록과_상세가_같은_작성자_신뢰정보를_내려준다() {
+        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, testUserId + 1
+        ).get(0).author();
+        MatchBoardItemResponse.AuthorSummary fromDetail =
+                matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
+
+        assertThat(fromDetail.rating()).isEqualTo(4.5);
+        assertThat(fromDetail.completedCount()).isEqualTo(12);
+        assertThat(fromDetail.noShowCount()).isEqualTo(2);
+        assertThat(fromDetail.latestReview()).isNull();
+
+        assertThat(fromBoard.rating()).isEqualTo(fromDetail.rating());
+        assertThat(fromBoard.completedCount()).isEqualTo(fromDetail.completedCount());
+        assertThat(fromBoard.noShowCount()).isEqualTo(fromDetail.noShowCount());
+        assertThat(fromBoard.latestReview()).isEqualTo(fromDetail.latestReview());
+    }
+
+    @Test
+    void 최근_후기가_있으면_목록과_상세에_같은_후기가_채워진다() {
+        giveReviewToTestUser("페이스 잘 맞춰주셨어요");
+
+        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, testUserId + 1
+        ).get(0).author();
+        MatchBoardItemResponse.AuthorSummary fromDetail =
+                matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
+
+        assertThat(fromDetail.latestReview()).isNotNull();
+        assertThat(fromDetail.latestReview().comment()).isEqualTo("페이스 잘 맞춰주셨어요");
+        assertThat(fromDetail.latestReview().createdAt()).isNotNull();
+        assertThat(fromBoard.latestReview()).isEqualTo(fromDetail.latestReview());
+    }
+
+    // "최근" 후기여야 한다 — 후기가 여러 건이면 created_at이 가장 나중인 것 하나만 골라야 한다.
+    // 후기 1건짜리 테스트만으로는 ORDER BY를 ASC로 바꾸거나 LIMIT을 지워도 안 깨지므로 2건을 넣는다.
+    // 일부러 최신 후기를 먼저 INSERT한다(id는 작고 created_at은 뒤) — 오래된 것부터 넣으면 id 순서와
+    // created_at 순서가 같아져서 ORDER BY id DESC만 남겨도 통과해버리기 때문. created_at이 1순위임을 고정.
+    @Test
+    void 후기가_여러_건이면_가장_최근_후기가_선택된다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(10);
+        giveReviewToTestUser("최신 후기", base.plusDays(2));
+        giveReviewToTestUser("오래된 후기", base.plusDays(1));
+
+        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, testUserId + 1
+        ).get(0).author();
+        MatchBoardItemResponse.AuthorSummary fromDetail =
+                matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
+
+        assertThat(fromBoard.latestReview().comment()).isEqualTo("최신 후기");
+        assertThat(fromDetail.latestReview().comment()).isEqualTo("최신 후기");
+    }
+
+    // 별점만 남기고 한 줄 후기(comment)는 안 쓴 후기도 "최근 후기"로 잡혀야 한다.
+    // 후기 존재 여부를 comment==null로 판단하면 이 케이스가 통째로 사라진다 — createdAt으로 판단하는지 확인.
+    @Test
+    void 별점만_남긴_후기도_최근_후기로_잡힌다() {
+        giveReviewToTestUser(null);
+
+        MatchBoardItemResponse.AuthorSummary fromDetail =
+                matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
+
+        assertThat(fromDetail.latestReview()).isNotNull();
+        assertThat(fromDetail.latestReview().comment()).isNull();
+        assertThat(fromDetail.latestReview().createdAt()).isNotNull();
     }
 
     @Test
