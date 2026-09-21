@@ -50,6 +50,10 @@ class AuthErrorStatusIntegrationTest {
     private static final String DUMMY_CODE_HASH = "00".repeat(32);
     private static final String ANY_CODE = "123456";
 
+    // 255자를 넘는 이메일. @Email은 로컬 파트가 64자를 넘는 주소를 먼저 거절하므로, 로컬 파트 244자 같은 값은 @Size가 없어도
+    // 400이라 길이 검증을 확인하지 못한다. 로컬 파트를 64자로 두어 형식은 유효하면서 길이만 초과하는 값(260자)을 쓴다
+    private static final String TOO_LONG_EMAIL = "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "com";
+
     // 테스트 간 이메일 UNIQUE 제약 충돌 방지
     private String randomEmail() {
         return "auth-status-" + UUID.randomUUID() + "@example.com";
@@ -203,6 +207,22 @@ class AuthErrorStatusIntegrationTest {
     @DisplayName("6자리 숫자가 아닌 인증 코드는 400")
     void 인증_코드_형식_오류_400() throws Exception {
         confirmCode(randomEmail(), VerificationPurpose.SIGNUP, "12AB")
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("255자를 넘는 이메일의 인증 코드 발송 요청은 400")
+    void 이메일_길이_초과_400() throws Exception {
+        // email_verifications.email이 VARCHAR(255)라 검증이 없으면 저장 단계에서 500
+        sendCode(TOO_LONG_EMAIL, VerificationPurpose.SIGNUP)
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("255자를 넘는 이메일의 인증 코드 확인 요청도 400")
+    void 이메일_길이_초과_확인_요청_400() throws Exception {
+        // 검증이 없으면 길이 초과가 그대로 서비스까지 가서 "발송 내역 없음" 409로 나간다
+        confirmCode(TOO_LONG_EMAIL, VerificationPurpose.SIGNUP, ANY_CODE)
                 .andExpect(status().isBadRequest());
     }
 
