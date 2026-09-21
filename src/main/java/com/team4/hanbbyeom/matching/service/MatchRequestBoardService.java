@@ -5,6 +5,7 @@ import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MatchBoardPageResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
@@ -30,6 +31,9 @@ public class MatchRequestBoardService {
     private static final List<MatchRequestStatus> ACTIVE_STATUSES =
             List.of(MatchRequestStatus.SEARCHING, MatchRequestStatus.PENDING_CONFIRMATION, MatchRequestStatus.MATCHED);
 
+    // 모집 탭 목록 한 페이지 크기 한도 (이슈 #103). 컨트롤러 기본값은 20.
+    public static final int BOARD_MAX_PAGE_SIZE = 50;
+
     private final MatchRequestRepository matchRequestRepository;
     private final MatchParticipantRepository matchParticipantRepository;
     private final ActivityMatchRepository activityMatchRepository;
@@ -52,20 +56,31 @@ public class MatchRequestBoardService {
     // 모집 탭 목록 조회 — 읽기 전용이라 상태 전이는 없다. 필터는 전부 선택적(null 허용)이며,
     // 거리/페이스는 값이 정확히 일치하는 게 아니라 "게시글의 범위와 필터 범위가 겹치는지"로
     // 판단한다(MatchRequestRepository.searchBoard 참고). currentUserId로 본인 글은 항상 제외된다.
-    public List<MatchBoardItemResponse> getBoard(String region, String talkLevel,
-                                                 Integer minDistance, Integer maxDistance,
-                                                 Integer minPace, Integer maxPace,
-                                                 String datePreset, Long currentUserId) {
+    // 커서 페이징(이슈 #103): cursor는 직전 페이지 마지막 글의 id(첫 페이지면 null), size는 1~50.
+    // size+1건을 조회해서 다음 페이지 존재 여부를 판단한다(MatchBoardPageResponse.of 참고).
+    public MatchBoardPageResponse getBoard(String region, String talkLevel,
+                                           Integer minDistance, Integer maxDistance,
+                                           Integer minPace, Integer maxPace,
+                                           String datePreset, Long currentUserId,
+                                           Long cursor, int size) {
+        // 잘못된 값은 IllegalArgumentException → GlobalExceptionHandler가 400으로 응답 (채팅의 afterId 검증과 같은 방식)
+        if (size < 1 || size > BOARD_MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("size는 1 이상 " + BOARD_MAX_PAGE_SIZE + " 이하여야 합니다.");
+        }
+        // cursor 존재 여부는 따로 검증하지 않는다 — 존재하지 않는 id면 쿼리의 행 비교가 NULL이 돼서 빈 페이지
+        // (items=[], hasNext=false)가 나오고, 프론트는 hasNext=false에서 멈추므로 해가 없다. 검증하려면 페이지마다
+        // 쿼리가 한 번 더 나가는데, cursor는 항상 직전 응답의 nextCursor라 정상 흐름에선 잘못될 일이 없다.
 
         OffsetDateTime[] range = resolveDateRange(datePreset);
 
         List<MatchRequestRepository.MatchBoardRow> rows = matchRequestRepository.searchBoard(
-                region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId
+                region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                cursor, size + 1
         );
 
         // 작성자 닉네임은 searchBoard가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
         // (예전엔 fetchNicknames()를 한 번 더 호출해 결과를 버리고 있었다 — 목록 조회마다 DB 왕복 1회 낭비)
-        return rows.stream()
+        List<MatchBoardItemResponse> fetched = rows.stream()
                 .map(row -> new MatchBoardItemResponse(
                         row.getId(),
                         row.getCourseName(),
@@ -85,6 +100,7 @@ public class MatchRequestBoardService {
                         )
                 ))
                 .collect(Collectors.toList());
+        return MatchBoardPageResponse.of(fetched, size);
     }
 
     // "오늘"/"내일"/"이번 주말" 같은 프리셋을 실제 날짜 범위로 변환. WEEKEND는 이번 주 토요일이

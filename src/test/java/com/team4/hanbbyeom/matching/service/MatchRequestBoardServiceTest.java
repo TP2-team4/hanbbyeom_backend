@@ -7,6 +7,7 @@ import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MatchBoardPageResponse;
 import com.team4.hanbbyeom.matching.dto.MyPostResponse;
 import com.team4.hanbbyeom.matching.dto.PendingApplicationResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
@@ -95,6 +96,35 @@ class MatchRequestBoardServiceTest {
         );
     }
 
+    // 기존 필터 테스트용 — 페이지 응답에서 items만 꺼낸다 (첫 페이지, size 20)
+    private List<MatchBoardItemResponse> getBoardItems(String region, String talkLevel,
+                                                       Integer minDistance, Integer maxDistance,
+                                                       Integer minPace, Integer maxPace,
+                                                       String datePreset, Long currentUserId,
+                                                       Long cursor, int size) {
+        return matchRequestBoardService.getBoard(
+                region, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, currentUserId, cursor, size
+        ).items();
+    }
+
+    // 페이징 테스트용 — 새 사용자로 SEARCHING 모집글을 하나 만들고 created_at을 지정한다.
+    // 사용자당 활성 모집글은 1건(uq_match_request_active_user)이라 글마다 사용자를 새로 만든다.
+    // created_at을 직접 넣는 이유: 같은 트랜잭션 안의 now()는 전부 같은 값이라 정렬 순서를 가를 수 없다.
+    // chk_match_request_time(created_at < search_expires_at < scheduled_at)을 만족하도록 미래 시각으로 잡는다.
+    private Long createSearchingPost(OffsetDateTime createdAt) {
+        Long authorId = createUser("작성자");
+        Long id = jdbcTemplate.queryForObject("""
+                INSERT INTO match_request (user_id, scheduled_at, talk_level, search_expires_at, created_at)
+                VALUES (?, ?, 'LIGHT_CHAT', ?, ?) RETURNING id
+                """, Long.class, authorId, createdAt.plusHours(48), createdAt.plusHours(4), createdAt);
+        jdbcTemplate.update("""
+                INSERT INTO run_match_condition
+                    (match_request_id, course_id, meeting_point, distance_min_meters, distance_max_meters, pace_min_sec, pace_max_sec)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, id, testCourseId, "뚝섬유원지역 3번 출구", 5000, 8000, 360, 400);
+        return id;
+    }
+
     private void giveReviewToTestUser(String comment) {
         giveReviewToTestUser(comment, OffsetDateTime.now());
     }
@@ -140,8 +170,8 @@ class MatchRequestBoardServiceTest {
 
     @Test
     void 코스_필터로_조회하면_일치하는_게시글만_반환되고_작성자_신뢰정보가_join된다() {
-        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                "뚝섬 한강공원", null, null, null, null, null, null, testUserId + 1 // 본인 제외되게 다른 id로 조회
+        List<MatchBoardItemResponse> result = getBoardItems(
+                "뚝섬 한강공원", null, null, null, null, null, null, testUserId + 1, null, 20 // 본인 제외되게 다른 id로 조회
         );
 
         assertThat(result).hasSize(1);
@@ -153,8 +183,8 @@ class MatchRequestBoardServiceTest {
 
     @Test
     void 코스_필터가_일치하지_않으면_조회되지_않는다() {
-        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                "여의도 한강공원", null, null, null, null, null, null, testUserId + 1
+        List<MatchBoardItemResponse> result = getBoardItems(
+                "여의도 한강공원", null, null, null, null, null, null, testUserId + 1, null, 20
         );
 
         assertThat(result).isEmpty();
@@ -162,8 +192,8 @@ class MatchRequestBoardServiceTest {
 
     @Test
     void 거리_범위가_겹치지_않으면_조회되지_않는다() {
-        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                null, null, 9000, 10000, null, null, null, testUserId + 1 // 테스트 데이터 범위(5000~8000)와 안 겹침
+        List<MatchBoardItemResponse> result = getBoardItems(
+                null, null, 9000, 10000, null, null, null, testUserId + 1, null, 20 // 테스트 데이터 범위(5000~8000)와 안 겹침
         );
 
         assertThat(result).isEmpty();
@@ -171,8 +201,8 @@ class MatchRequestBoardServiceTest {
 
     @Test
     void 페이스_범위가_겹치지_않으면_조회되지_않는다() {
-        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                null, null, null, null, 450, 500, null, testUserId + 1 // 테스트 데이터 범위(360~400)와 안 겹침
+        List<MatchBoardItemResponse> result = getBoardItems(
+                null, null, null, null, 450, 500, null, testUserId + 1, null, 20 // 테스트 데이터 범위(360~400)와 안 겹침
         );
 
         assertThat(result).isEmpty();
@@ -180,8 +210,8 @@ class MatchRequestBoardServiceTest {
 
     @Test
     void 본인이_작성한_게시글은_목록에서_제외된다() {
-        List<MatchBoardItemResponse> result = matchRequestBoardService.getBoard(
-                null, null, null, null, null, null, null, testUserId // 작성자 본인으로 조회
+        List<MatchBoardItemResponse> result = getBoardItems(
+                null, null, null, null, null, null, null, testUserId, null, 20 // 작성자 본인으로 조회
         );
 
         assertThat(result).isEmpty();
@@ -202,8 +232,8 @@ class MatchRequestBoardServiceTest {
     // 그 버그가 그대로 남았을 것이다. 후기가 없는 상태에서는 latestReview가 양쪽 모두 null이어야 한다.
     @Test
     void 목록과_상세가_같은_작성자_신뢰정보를_내려준다() {
-        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
-                null, null, null, null, null, null, null, testUserId + 1
+        MatchBoardItemResponse.AuthorSummary fromBoard = getBoardItems(
+                null, null, null, null, null, null, null, testUserId + 1, null, 20
         ).get(0).author();
         MatchBoardItemResponse.AuthorSummary fromDetail =
                 matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
@@ -223,8 +253,8 @@ class MatchRequestBoardServiceTest {
     void 최근_후기가_있으면_목록과_상세에_같은_후기가_채워진다() {
         giveReviewToTestUser("페이스 잘 맞춰주셨어요");
 
-        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
-                null, null, null, null, null, null, null, testUserId + 1
+        MatchBoardItemResponse.AuthorSummary fromBoard = getBoardItems(
+                null, null, null, null, null, null, null, testUserId + 1, null, 20
         ).get(0).author();
         MatchBoardItemResponse.AuthorSummary fromDetail =
                 matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
@@ -245,8 +275,8 @@ class MatchRequestBoardServiceTest {
         giveReviewToTestUser("최신 후기", base.plusDays(2));
         giveReviewToTestUser("오래된 후기", base.plusDays(1));
 
-        MatchBoardItemResponse.AuthorSummary fromBoard = matchRequestBoardService.getBoard(
-                null, null, null, null, null, null, null, testUserId + 1
+        MatchBoardItemResponse.AuthorSummary fromBoard = getBoardItems(
+                null, null, null, null, null, null, null, testUserId + 1, null, 20
         ).get(0).author();
         MatchBoardItemResponse.AuthorSummary fromDetail =
                 matchRequestBoardService.getDetail(testMatchRequestId, testUserId).author();
@@ -362,5 +392,135 @@ class MatchRequestBoardServiceTest {
 
         assertThatThrownBy(() -> matchRequestBoardService.getMyActiveRequest(noRequestUserId))
                 .isInstanceOf(MatchRequestNotFoundException.class);
+    }
+
+    // ---------- 커서 페이징 (이슈 #103) ----------
+
+    // 정렬 고정: created_at DESC, id DESC. 일부러 오래된 글을 나중에 INSERT해서(id는 크고 created_at은 앞)
+    // id 순서와 created_at 순서를 어긋나게 둔다 — ORDER BY id DESC만으로는 통과 못 하고 created_at이
+    // 1순위일 때만 통과. setUp의 testMatchRequestId(created_at=now)가 가장 최신이라 맨 앞에 온다.
+    @Test
+    void 목록은_created_at_내림차순_동시각이면_id_내림차순으로_정렬된다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(1);
+        Long newer = createSearchingPost(base.plusHours(2));
+        Long older = createSearchingPost(base.plusHours(1));
+        Long sameTimeAsOlder = createSearchingPost(base.plusHours(1)); // older와 동시각, id는 더 큼
+
+        List<MatchBoardItemResponse> items = getBoardItems(null, null, null, null, null, null, null, -1L, null, 20);
+
+        assertThat(items).extracting(MatchBoardItemResponse::id)
+                .containsExactly(testMatchRequestId, newer, sameTimeAsOlder, older);
+    }
+
+    // size만큼만 내려주고, 더 있으면 hasNext=true + nextCursor=마지막 항목 id. 정확히 size건이면 hasNext=false.
+    @Test
+    void size만큼_잘라서_내려주고_다음_페이지_여부를_알려준다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(1);
+        Long p1 = createSearchingPost(base.plusHours(3));
+        Long p2 = createSearchingPost(base.plusHours(2));
+        createSearchingPost(base.plusHours(1));
+        // 총 4건 (setUp 1건 + 3건)
+
+        MatchBoardPageResponse page = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 3);
+
+        assertThat(page.items()).extracting(MatchBoardItemResponse::id).containsExactly(testMatchRequestId, p1, p2);
+        assertThat(page.hasNext()).isTrue();
+        assertThat(page.nextCursor()).isEqualTo(p2);
+
+        MatchBoardPageResponse exact = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 4);
+        assertThat(exact.items()).hasSize(4);
+        assertThat(exact.hasNext()).isFalse();
+        assertThat(exact.nextCursor()).isNull();
+    }
+
+    // cursor로 이어 받으면 이전 페이지와 겹치지 않고 빠지는 글도 없다. 두 페이지 사이에 새 글이 들어와도
+    // (오프셋 방식이면 한 칸씩 밀려 중복이 생기는 상황) 커서는 "이 글 다음부터"라 영향이 없다.
+    @Test
+    void cursor로_다음_페이지를_받으면_중복도_누락도_없고_새_글이_끼어들어도_영향이_없다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(1);
+        Long p1 = createSearchingPost(base.plusHours(4));
+        Long p2 = createSearchingPost(base.plusHours(3));
+        Long p3 = createSearchingPost(base.plusHours(2));
+        Long p4 = createSearchingPost(base.plusHours(1));
+
+        MatchBoardPageResponse first = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 2);
+        assertThat(first.items()).extracting(MatchBoardItemResponse::id).containsExactly(testMatchRequestId, p1);
+
+        // 첫 페이지를 받은 뒤 최신 글이 하나 더 올라온 상황
+        createSearchingPost(OffsetDateTime.now().plusMinutes(1));
+
+        MatchBoardPageResponse second = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, first.nextCursor(), 2);
+        assertThat(second.items()).extracting(MatchBoardItemResponse::id).containsExactly(p2, p3);
+
+        MatchBoardPageResponse third = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, second.nextCursor(), 2);
+        assertThat(third.items()).extracting(MatchBoardItemResponse::id).containsExactly(p4);
+        assertThat(third.hasNext()).isFalse();
+    }
+
+    // 동시각 글이 페이지 경계에 걸려도 (created_at, id) 행 비교라 정확히 이어진다 — id만 비교하면
+    // 여기서 중복/누락이 생긴다.
+    @Test
+    void 동시각_글이_페이지_경계에_걸려도_정확히_이어진다() {
+        OffsetDateTime sameTime = OffsetDateTime.now().minusDays(1);
+        Long a = createSearchingPost(sameTime);
+        Long b = createSearchingPost(sameTime);
+        Long c = createSearchingPost(sameTime);
+        // 정렬: testMatchRequestId, c, b, a (동시각은 id DESC)
+
+        MatchBoardPageResponse first = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 2);
+        MatchBoardPageResponse second = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, first.nextCursor(), 2);
+
+        assertThat(first.items()).extracting(MatchBoardItemResponse::id).containsExactly(testMatchRequestId, c);
+        assertThat(second.items()).extracting(MatchBoardItemResponse::id).containsExactly(b, a);
+        assertThat(second.hasNext()).isFalse();
+    }
+
+    // 필터와 커서를 같이 써도 필터 결과 안에서만 이어진다.
+    @Test
+    void 필터와_cursor를_함께_쓰면_필터_결과_안에서_이어진다() {
+        OffsetDateTime base = OffsetDateTime.now().minusDays(1);
+        Long p1 = createSearchingPost(base.plusHours(2));
+        Long p2 = createSearchingPost(base.plusHours(1));
+
+        MatchBoardPageResponse first = matchRequestBoardService.getBoard(
+                "뚝섬 한강공원", null, null, null, null, null, null, -1L, null, 2);
+        MatchBoardPageResponse second = matchRequestBoardService.getBoard(
+                "뚝섬 한강공원", null, null, null, null, null, null, -1L, first.nextCursor(), 2);
+
+        assertThat(first.items()).extracting(MatchBoardItemResponse::id).containsExactly(testMatchRequestId, p1);
+        assertThat(second.items()).extracting(MatchBoardItemResponse::id).containsExactly(p2);
+
+        MatchBoardPageResponse other = matchRequestBoardService.getBoard(
+                "여의도 한강공원", null, null, null, null, null, null, -1L, null, 2);
+        assertThat(other.items()).isEmpty();
+        assertThat(other.hasNext()).isFalse();
+    }
+
+    @Test
+    void size가_범위_밖이면_거부한다() {
+        assertThatThrownBy(() -> matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, null, MatchRequestBoardService.BOARD_MAX_PAGE_SIZE + 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // 존재하지 않는 cursor는 별도 검증(추가 쿼리) 없이 빈 페이지로 끝난다 — 프론트는 hasNext=false에서 멈춘다.
+    @Test
+    void 존재하지_않는_cursor는_빈_페이지를_돌려준다() {
+        MatchBoardPageResponse page = matchRequestBoardService.getBoard(
+                null, null, null, null, null, null, null, -1L, 999_999_999L, 20);
+
+        assertThat(page.items()).isEmpty();
+        assertThat(page.hasNext()).isFalse();
+        assertThat(page.nextCursor()).isNull();
     }
 }

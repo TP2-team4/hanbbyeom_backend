@@ -3,7 +3,7 @@ package com.team4.hanbbyeom.matching.controller;
 import com.team4.hanbbyeom.global.security.CustomUserDetails;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.dto.MatchApplyRequest;
-import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
+import com.team4.hanbbyeom.matching.dto.MatchBoardPageResponse;
 import com.team4.hanbbyeom.matching.dto.MyApplicationResponse;
 import com.team4.hanbbyeom.matching.dto.TrustProfileResponse;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
@@ -44,12 +44,16 @@ public class MatchRequestBoardController {
     // 모집 탭 목록 조회 — 쿼리 파라미터는 전부 선택값(생략 가능): course/talkLevel은 정확히
     // 일치하는 값만, minDistance~maxPace는 "게시글의 범위와 겹치는지"로 필터링, datePreset은
     // TODAY/TOMORROW/WEEKEND 중 하나. 인증된 사용자 id로 본인이 올린 글은 결과에서 항상 제외된다.
-    @Operation(summary = "모집 탭 목록 조회",
+    // 커서 페이징(이슈 #103): 첫 페이지는 cursor 없이, 다음 페이지는 직전 응답의 nextCursor를 cursor로.
+    // size 범위(1~50) 검증은 Service가 한다.
+    @Operation(summary = "모집 탭 목록 조회 (커서 페이징)",
             description = "course/talkLevel은 정확히 일치하는 값만, minDistance~maxPace는 게시글의 범위와 겹치는 것만, " +
                     "datePreset(TODAY/TOMORROW/WEEKEND)은 해당 기간에 속하는 것만 필터링합니다. " +
-                    "모든 파라미터는 선택값이며, 조회자 본인 글은 항상 제외됩니다.")
+                    "모든 필터는 선택값이며, 조회자 본인 글은 항상 제외됩니다. " +
+                    "최신 글부터 size(기본 20, 최대 50)건씩 내려주며, 응답의 hasNext가 true면 nextCursor를 " +
+                    "cursor로 넘겨 다음 페이지를 받습니다. size가 1~50 범위 밖이면 400, 존재하지 않는 cursor는 빈 페이지(hasNext=false).")
     @GetMapping
-    public List<MatchBoardItemResponse> getBoard(
+    public MatchBoardPageResponse getBoard(
             @RequestParam(required = false) String course,
             @RequestParam(required = false) String talkLevel,
             @RequestParam(required = false) Integer minDistance,
@@ -57,10 +61,15 @@ public class MatchRequestBoardController {
             @RequestParam(required = false) Integer minPace,
             @RequestParam(required = false) Integer maxPace,
             @RequestParam(required = false) String datePreset, // "TODAY" | "TOMORROW" | "WEEKEND"
+            @RequestParam(required = false) Long cursor,      // 직전 페이지 마지막 글의 id (첫 페이지면 생략)
+            @RequestParam(defaultValue = "20") int size,
             // @AuthenticationPrincipal: JWT 인증 필터가 SecurityContext에 넣어둔 인증된 사용자 정보
             @AuthenticationPrincipal CustomUserDetails principal
     ) {
-        return matchRequestBoardService.getBoard(course, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, principal.getUserId());
+        return matchRequestBoardService.getBoard(
+                course, talkLevel, minDistance, maxDistance, minPace, maxPace, datePreset, principal.getUserId(),
+                cursor, size
+        );
     }
 
     // requestId(호스트 게시글)의 작성자 신뢰도 프로필 조회 — 신청하기 전 "이 사람 어떤 사람이지"

@@ -32,6 +32,15 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
     // WHERE절의 파라미터들은 전부 "값이 없으면(:xxx IS NULL) 그 조건은 무시"하는 선택적 필터이고,
     // 거리/페이스는 정확히 일치가 아니라 "게시글의 범위와 필터 범위가 겹치는지"로 판단한다
     // (예: 필터 minDistance=9000인데 게시글이 5000~8000이면 겹치지 않으므로 제외).
+    // 정렬·페이징(이슈 #103): 최신 글이 위로 오도록 created_at DESC, id DESC(동시각 타이브레이커)로
+    // 고정하고, 커서(마지막으로 받은 글의 id)보다 "뒤"인 행만 LIMIT만큼 돌려준다. 커서 비교는
+    // 정렬 키 (created_at, id) 행 비교로 해서 정렬 순서와 정확히 같은 기준으로 자른다 — id만 비교하면
+    // created_at이 같은 순서라는 보장이 없어서 중복/누락이 생길 수 있다. 오프셋(page)이 아니라
+    // 커서를 쓰는 이유: 모집 탭은 새 글이 계속 위로 들어오는 피드라 오프셋이면 스크롤 중 새 글이
+    // 끼어들 때 같은 글이 두 번 보이거나 한 글이 건너뛰어진다. 커서는 "이 글 다음부터"라 영향이 없다.
+    // 정렬용 인덱스는 따로 두지 않는다 — uq_match_request_active_user 때문에 SEARCHING 글은 사용자당
+    // 최대 1건이라 정렬 대상이 작다(사용자 수 이하). 실데이터 EXPLAIN에서 정렬 비용이 보이면
+    // (status, activity_type, created_at DESC, id DESC) 부분 인덱스를 그때 추가한다.
     @Query(value = """
     SELECT mr.id AS id,
            co.name AS courseName,
@@ -72,6 +81,10 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
       AND (:maxPace IS NULL OR rc.pace_min_sec <= :maxPace)
       AND (CAST(:dateFrom AS timestamptz) IS NULL OR mr.scheduled_at >= CAST(:dateFrom AS timestamptz))
       AND (CAST(:dateTo AS timestamptz) IS NULL OR mr.scheduled_at < CAST(:dateTo AS timestamptz))
+      AND (CAST(:cursorId AS bigint) IS NULL
+           OR (mr.created_at, mr.id) < (SELECT c.created_at, c.id FROM match_request c WHERE c.id = CAST(:cursorId AS bigint)))
+    ORDER BY mr.created_at DESC, mr.id DESC
+    LIMIT :limit
     """, nativeQuery = true)
     List<MatchBoardRow> searchBoard(@Param("course") String course,
                                     @Param("talkLevel") String talkLevel,
@@ -81,7 +94,9 @@ public interface MatchRequestRepository extends JpaRepository<MatchRequest, Long
                                     @Param("maxPace") Integer maxPace,
                                     @Param("dateFrom") OffsetDateTime dateFrom,
                                     @Param("dateTo") OffsetDateTime dateTo,
-                                    @Param("excludeUserId") Long excludeUserId);
+                                    @Param("excludeUserId") Long excludeUserId,
+                                    @Param("cursorId") Long cursorId,
+                                    @Param("limit") int limit);
 
     // 네이티브 쿼리 결과 한 행을 매핑하는 Spring Data JPA 프로젝션 인터페이스.
     // SELECT의 `AS 별칭`이 여기 getter 이름(별칭 앞글자만 소문자로 바꾼 형태)과 일치해야
