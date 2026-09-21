@@ -357,6 +357,19 @@ class MatchApplyServiceTest {
         assertThat(host.latestReview().createdAt()).isNotNull();
     }
 
+    // 호스트에게 trust_profile 행이 없으면(활동 이력 없음) 횟수는 0, 별점은 null — 목록/상세/프로필 API와 같은 규칙 (이슈 #94)
+    @Test
+    void 신뢰_프로필이_없는_호스트_카드는_횟수_0_별점_null로_내려준다() {
+        matchApplyService.apply(applicantUserId, hostRequestId);
+
+        MatchBoardItemResponse.AuthorSummary host =
+                matchApplyService.getMyApplications(applicantUserId, null).get(0).host();
+        assertThat(host.rating()).isNull();
+        assertThat(host.completedCount()).isZero();
+        assertThat(host.noShowCount()).isZero();
+        assertThat(host.latestReview()).isNull();
+    }
+
     // 호스트가 "과거에 후기를 받은" 상태를 만든다 — 새 리뷰어와 이미 끝난 매칭을 하나 만들고 리뷰어가 호스트에게
     // 후기를 남긴 것으로 activity_review를 직접 INSERT한다(복합 FK 때문에 두 사람 모두 그 매칭의 참가자여야 함).
     // 참가 행은 만들자마자 release()한다 — 이 테스트가 이어서 apply()로 호스트에게 새 활성 참가 행을 만들기
