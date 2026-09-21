@@ -131,7 +131,7 @@ class CompletedActivityCountIntegrationTest {
         // 3) 모집 탭 목록의 작성자 카드
         mockMvc.perform(get("/api/matching/board").header(HttpHeaders.AUTHORIZATION, bearerToken(viewer)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == " + newPost.getId() + ")].author.completedCount").value(hasItem(1)));
+                .andExpect(jsonPath("$.items[?(@.id == " + newPost.getId() + ")].author.completedCount").value(hasItem(1)));
 
         // 4) 신청자 프로필 — 종료된 활동을 완료한 신청자가 새 모집글에 신청하면 호스트가 그 프로필을 본다
         Long applicationMatchId = matchApplyService.apply(applicant, newPost.getId());
