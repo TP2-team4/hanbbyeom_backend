@@ -106,8 +106,8 @@ public class User {
         this.defaultTalkLevel = Objects.requireNonNull(defaultTalkLevel);
     }
 
-    // 닉네임 변경 — 활성 계정은 닉네임이 반드시 있어야 하므로(chk_users_account_lifecycle) null을 허용하지 않는다.
-    // 길이·공백 검증은 요청 DTO(UserNicknameUpdateRequest)가 담당한다.
+    // 닉네임 변경: 활성 계정은 닉네임 필수(chk_users_account_lifecycle)라 null 미허용
+    // 길이·공백 검증은 요청 DTO(UserNicknameUpdateRequest) 담당
     public void changeNickname(String nickname) {
         this.nickname = Objects.requireNonNull(nickname);
     }
@@ -117,9 +117,8 @@ public class User {
         this.passwordHash = Objects.requireNonNull(passwordHash);
     }
 
-    // 회원 탈퇴 — 개인정보(이메일/비밀번호 해시/닉네임/기본 대화 수준/이메일 인증 시각)를
-    // 전부 NULL로 지우고 탈퇴 시각을 기록한다. chk_users_account_lifecycle 제약(활성 계정=4개
-    // 필드 전부 NOT NULL, 탈퇴 계정=전부 NULL)과 정확히 대응하도록 설계됐다.
+    // 회원 탈퇴: 개인정보(이메일/비밀번호 해시/닉네임/기본 대화 수준/이메일 인증 시각) 전부 NULL 처리 및 탈퇴 시각 기록
+    // chk_users_account_lifecycle 제약(활성 계정=4개 필드 전부 NOT NULL, 탈퇴 계정=전부 NULL)과 정확히 대응
     public void withdraw() {
         this.email = null;
         this.passwordHash = null;
