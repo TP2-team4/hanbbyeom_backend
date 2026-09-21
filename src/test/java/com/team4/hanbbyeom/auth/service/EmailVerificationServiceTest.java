@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.service;
 
+import com.team4.hanbbyeom.auth.exception.EmailVerificationConflictException;
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
@@ -274,7 +275,7 @@ class EmailVerificationServiceTest {
 
         // 발송 요청 자체를 한 적 없는 이메일로 확인을 시도하는 상황
         assertThrows(
-                IllegalStateException.class,
+                EmailVerificationConflictException.class,
                 () -> emailVerificationService.confirmCode(
                         email,
                         VerificationPurpose.SIGNUP,
@@ -304,7 +305,7 @@ class EmailVerificationServiceTest {
         );
 
         assertThrows(
-                IllegalStateException.class,
+                EmailVerificationConflictException.class,
                 () -> emailVerificationService.confirmCode(
                         email,
                         VerificationPurpose.SIGNUP,
@@ -404,7 +405,7 @@ class EmailVerificationServiceTest {
         emailVerificationRepository.save(verification);
 
         assertThrows(
-                IllegalStateException.class,
+                EmailVerificationConflictException.class,
                 () -> emailVerificationService.confirmCode(
                         email,
                         VerificationPurpose.SIGNUP,
@@ -431,7 +432,7 @@ class EmailVerificationServiceTest {
         emailVerificationRepository.save(verification);
 
         assertThrows(
-                IllegalStateException.class,
+                EmailVerificationConflictException.class,
                 () -> emailVerificationService.confirmCode(
                         email,
                         VerificationPurpose.SIGNUP,
