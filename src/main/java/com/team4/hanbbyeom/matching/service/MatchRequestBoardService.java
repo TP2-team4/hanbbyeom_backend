@@ -4,6 +4,7 @@ import com.team4.hanbbyeom.matching.domain.ActivityMatch;
 import com.team4.hanbbyeom.matching.domain.ActivityMatchStatus;
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
+import com.team4.hanbbyeom.matching.dto.BoardSort;
 import com.team4.hanbbyeom.matching.dto.MatchBoardItemResponse;
 import com.team4.hanbbyeom.matching.dto.MatchBoardPageResponse;
 import com.team4.hanbbyeom.matching.dto.MatchRequestResponse;
@@ -55,14 +56,15 @@ public class MatchRequestBoardService {
 
     // 모집 탭 목록 조회 — 읽기 전용이라 상태 전이는 없다. 필터는 전부 선택적(null 허용)이며,
     // 거리/페이스는 값이 정확히 일치하는 게 아니라 "게시글의 범위와 필터 범위가 겹치는지"로
-    // 판단한다(MatchRequestRepository.searchBoard 참고). currentUserId로 본인 글은 항상 제외된다.
+    // 판단한다(MatchRequestRepository.BOARD_BASE 참고). currentUserId로 본인 글은 항상 제외된다.
     // 커서 페이징(이슈 #103): cursor는 직전 페이지 마지막 글의 id(첫 페이지면 null), size는 1~50.
     // size+1건을 조회해서 다음 페이지 존재 여부를 판단한다(MatchBoardPageResponse.of 참고).
+    // 정렬(이슈 #123): sort에 따라 정렬 키와 커서 비교 조건이 다른 쿼리를 고른다 — cursor는 같은 sort에서만 유효.
     public MatchBoardPageResponse getBoard(String region, String talkLevel,
                                            Integer minDistance, Integer maxDistance,
                                            Integer minPace, Integer maxPace,
                                            String datePreset, Long currentUserId,
-                                           Long cursor, int size) {
+                                           Long cursor, int size, BoardSort sort) {
         // 잘못된 값은 IllegalArgumentException → GlobalExceptionHandler가 400으로 응답 (채팅의 afterId 검증과 같은 방식)
         if (size < 1 || size > BOARD_MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("size는 1 이상 " + BOARD_MAX_PAGE_SIZE + " 이하여야 합니다.");
@@ -73,12 +75,19 @@ public class MatchRequestBoardService {
 
         OffsetDateTime[] range = resolveDateRange(datePreset);
 
-        List<MatchRequestRepository.MatchBoardRow> rows = matchRequestRepository.searchBoard(
-                region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
-                cursor, size + 1
-        );
+        List<MatchRequestRepository.MatchBoardRow> rows = switch (sort) {
+            case LATEST -> matchRequestRepository.searchBoardLatest(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+            case SCHEDULED -> matchRequestRepository.searchBoardByScheduled(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+            case DISTANCE -> matchRequestRepository.searchBoardByDistance(
+                    region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId,
+                    cursor, size + 1);
+        };
 
-        // 작성자 닉네임은 searchBoard가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
+        // 작성자 닉네임은 목록 쿼리가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
         // (예전엔 fetchNicknames()를 한 번 더 호출해 결과를 버리고 있었다 — 목록 조회마다 DB 왕복 1회 낭비)
         List<MatchBoardItemResponse> fetched = rows.stream()
                 .map(row -> new MatchBoardItemResponse(

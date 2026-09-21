@@ -158,6 +158,15 @@ class MatchingFlowIntegrationTest {
         mockMvc.perform(get("/api/matching/board").param("size", "51")
                         .header(HttpHeaders.AUTHORIZATION, applicantToken))
                 .andExpect(status().isBadRequest());
+        // → 허용되지 않는 sort 값은 400, 허용 값은 대소문자 무관 (#123)
+        mockMvc.perform(get("/api/matching/board").param("sort", "NEWEST")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("sort는 LATEST, SCHEDULED, DISTANCE 중 하나여야 합니다."));
+        mockMvc.perform(get("/api/matching/board").param("sort", "scheduled")
+                        .header(HttpHeaders.AUTHORIZATION, applicantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == %d)]".formatted(hostRequestId)).exists());
 
         // 2) 사용자 B가 필터로 게시글을 찾은 뒤, 호스트 신뢰 프로필 조회
         mockMvc.perform(get("/api/matching/board/{requestId}/host-profile", hostRequestId)
