@@ -59,8 +59,8 @@ public interface ActivityMatchRepository extends JpaRepository<ActivityMatch, Lo
                host.match_request_id AS hostMatchRequestId,
                u.nickname AS hostNickname,
                tp.average_rating AS hostRating,
-               tp.completed_activity_count AS hostCompletedCount,
-               tp.no_show_report_count AS hostNoShowCount,
+               COALESCE(tp.completed_activity_count, 0) AS hostCompletedCount,
+               COALESCE(tp.no_show_report_count, 0) AS hostNoShowCount,
                latest_review.comment AS latestReviewComment,
                latest_review.created_at AS latestReviewCreatedAt
         FROM match_participant applicant

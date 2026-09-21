@@ -3,6 +3,7 @@ package com.team4.hanbbyeom.matching.service;
 import com.team4.hanbbyeom.matching.repository.ActivityMatchRepository;
 import com.team4.hanbbyeom.matching.repository.MatchParticipantRepository;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
+import com.team4.hanbbyeom.trust.repository.TrustProfileRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,7 +28,8 @@ class MatchDecisionServiceExpireRequestsTest {
     private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
     private final MatchDecisionService service = new MatchDecisionService(
             mock(MatchRequestRepository.class), mock(ActivityMatchRepository.class),
-            mock(MatchParticipantRepository.class), jdbcTemplate, Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+            mock(MatchParticipantRepository.class), jdbcTemplate, mock(TrustProfileRepository.class),
+            Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
 
     // 다른 상태 전이(신청·취소·수락·거절)와 같은 matching_mutex 락을 먼저 잡아야 한다. 락 없이 갱신하면 동시에 들어온
     // 신청·취소와 순서가 섞여 게시글과 매칭이 어긋날 수 있다.

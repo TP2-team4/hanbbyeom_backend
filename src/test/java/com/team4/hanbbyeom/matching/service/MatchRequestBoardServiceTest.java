@@ -394,6 +394,26 @@ class MatchRequestBoardServiceTest {
                 .isInstanceOf(MatchRequestNotFoundException.class);
     }
 
+    // trust_profile 행이 없는 작성자(활동 이력 없음)의 카드 규칙 — 횟수는 0, 별점은 null(평가 없음).
+    // 프로필 조회 API(TrustProfileLookupService.lookup())와 같은 규칙으로 통일 (이슈 #94).
+    // 이전엔 LEFT JOIN 결과 그대로 셋 다 null이라 프로필 API(0)와 어긋났다.
+    @Test
+    void 신뢰_프로필이_없는_작성자는_횟수_0_별점_null로_내려준다() {
+        Long postWithoutProfile = createSearchingPost(OffsetDateTime.now().minusDays(1));
+
+        MatchBoardItemResponse.AuthorSummary fromBoard = getBoardItems(null, null, null, null, null, null, null, -1L, null, 20)
+                .stream().filter(item -> item.id().equals(postWithoutProfile)).findFirst().orElseThrow().author();
+        MatchBoardItemResponse.AuthorSummary fromDetail =
+                matchRequestBoardService.getDetail(postWithoutProfile, -1L).author();
+
+        assertThat(fromBoard.rating()).isNull();
+        assertThat(fromBoard.completedCount()).isZero();
+        assertThat(fromBoard.noShowCount()).isZero();
+        assertThat(fromDetail.rating()).isNull();
+        assertThat(fromDetail.completedCount()).isZero();
+        assertThat(fromDetail.noShowCount()).isZero();
+    }
+
     // ---------- 커서 페이징 (이슈 #103) ----------
 
     // 정렬 고정: created_at DESC, id DESC. 일부러 오래된 글을 나중에 INSERT해서(id는 크고 created_at은 앞)
