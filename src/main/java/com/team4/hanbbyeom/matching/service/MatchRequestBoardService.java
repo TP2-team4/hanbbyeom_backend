@@ -63,8 +63,8 @@ public class MatchRequestBoardService {
                 region, talkLevel, minDistance, maxDistance, minPace, maxPace, range[0], range[1], currentUserId
         );
 
-        Map<Long, String> nicknameByUserId = fetchNicknames(rows.stream().map(MatchRequestRepository.MatchBoardRow::getUserId).toList());
-
+        // 작성자 닉네임은 searchBoard가 users를 조인해서 이미 가져오므로 여기서 다시 조회하지 않는다.
+        // (예전엔 fetchNicknames()를 한 번 더 호출해 결과를 버리고 있었다 — 목록 조회마다 DB 왕복 1회 낭비)
         return rows.stream()
                 .map(row -> new MatchBoardItemResponse(
                         row.getId(),
@@ -78,7 +78,10 @@ public class MatchRequestBoardService {
                         new MatchBoardItemResponse.AuthorSummary(
                                 row.getAuthorNickname(),
                                 row.getAuthorRating(),
-                                row.getAuthorCompletedCount()
+                                row.getAuthorCompletedCount(),
+                                row.getAuthorNoShowCount(),
+                                MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                        row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
                         )
                 ))
                 .collect(Collectors.toList());
@@ -155,7 +158,16 @@ public class MatchRequestBoardService {
                 row.getStatus(),
                 row.getUserId().equals(currentUserId),
                 pendingApplicantCount,
-                new MatchBoardItemResponse.AuthorSummary(nickname, null, null)
+                // 목록(getBoard)과 같은 값을 내려준다 — 이전엔 (nickname, null, null)로 하드코딩돼 있어
+                // 상세 화면에서만 평점/완료횟수가 항상 비어 보이던 버그 (이슈 #70)
+                new MatchBoardItemResponse.AuthorSummary(
+                        nickname,
+                        row.getAuthorRating(),
+                        row.getAuthorCompletedCount(),
+                        row.getAuthorNoShowCount(),
+                        MatchBoardItemResponse.AuthorSummary.LatestReview.of(
+                                row.getLatestReviewComment(), row.getLatestReviewCreatedAt())
+                )
         );
     }
 
