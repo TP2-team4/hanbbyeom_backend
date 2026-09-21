@@ -2,6 +2,7 @@ package com.team4.hanbbyeom.global.exception;
 
 import com.team4.hanbbyeom.auth.exception.DuplicateEmailException;
 import com.team4.hanbbyeom.auth.exception.EmailVerificationConflictException;
+import com.team4.hanbbyeom.auth.exception.VerificationResendTooSoonException;
 import com.team4.hanbbyeom.chat.exception.ChatUnavailableException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackAlreadySubmittedException;
 import com.team4.hanbbyeom.feedback.exception.FeedbackNotAllowedException;
@@ -90,6 +91,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAuthConflict(RuntimeException e) {
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(e.getMessage()));
+    }
+
+    // AUTH: 재발송 대기시간 이내의 인증 코드 재요청 처리
+    // 대기시간이 지나면 같은 요청이 성공하는 일시적 제한이라 409가 아닌 429로 응답
+    @ExceptionHandler(VerificationResendTooSoonException.class)
+    public ResponseEntity<ErrorResponse> handleResendTooSoon(VerificationResendTooSoonException e) {
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(new ErrorResponse(e.getMessage()));
     }
 

@@ -5,6 +5,7 @@ import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.exception.EmailVerificationFailedException;
 import com.team4.hanbbyeom.auth.exception.EmailVerificationConflictException;
 import com.team4.hanbbyeom.auth.exception.PasswordResetAuthenticationException;
+import com.team4.hanbbyeom.auth.exception.VerificationResendTooSoonException;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.global.util.EmailNormalizer;
@@ -89,7 +90,7 @@ public class EmailVerificationService {
 
         // 재발송 제한 응답: 기존 SIGNUP 목적과 동일한 문구 사용
         if (!resendAllowed) {
-            throw new IllegalStateException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
+            throw new VerificationResendTooSoonException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
         }
 
         String code = generateCode(); // 인증번호 생성
