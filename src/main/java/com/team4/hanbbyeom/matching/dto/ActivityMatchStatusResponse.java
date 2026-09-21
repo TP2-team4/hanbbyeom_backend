@@ -10,7 +10,7 @@ import java.time.OffsetDateTime;
 // 채팅방 상단에서도 같은 엔드포인트를 사용하므로 상대 사용자 ID와 코스·장소·예정 시간을 함께 반환.
 public record ActivityMatchStatusResponse(
         Long activityMatchId,
-        String status, // "PROPOSED" | "CONFIRMED" | "REJECTED" | "EXPIRED" | "ENDED"
+        String status, // "PROPOSED" | "CONFIRMED" | "REJECTED" | "CANCELLED" | "EXPIRED" | "ENDED"
         String meetingCode, // CONFIRMED일 때만 값이 있음
         OffsetDateTime confirmedAt, // CONFIRMED일 때만
         OffsetDateTime closedAt, // REJECTED/EXPIRED/ENDED일 때만
