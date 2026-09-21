@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.matching;
 
+import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
@@ -149,7 +150,7 @@ class MatchingEditPathsLockTest {
 
         Throwable result = editWhileTransitionInFlight(() -> {
             matchRequestCommandService.update(userId, postId,
-                    new MatchRequestUpdateRequest(OffsetDateTime.now().plusDays(5), "SILENT"));
+                    new MatchRequestUpdateRequest(OffsetDateTime.now().plusDays(5), TalkLevel.SILENT));
             return null;
         });
 

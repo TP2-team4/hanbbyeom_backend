@@ -2,7 +2,6 @@ package com.team4.hanbbyeom.matching.service;
 
 import com.team4.hanbbyeom.matching.domain.MatchRequest;
 import com.team4.hanbbyeom.matching.domain.MatchRequestStatus;
-import com.team4.hanbbyeom.matching.domain.TalkLevel;
 import com.team4.hanbbyeom.matching.dto.MatchRequestCreateRequest;
 import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestException;
@@ -54,7 +53,7 @@ public class MatchRequestCommandService {
         MatchRequest matchRequest = new MatchRequest(
                 userId,
                 request.scheduledAt(),
-                TalkLevel.valueOf(request.talkLevel()),
+                request.talkLevel(),
                 searchExpiresAt
         );
 
@@ -99,7 +98,7 @@ public class MatchRequestCommandService {
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "수정");
         validateScheduledAt(request.scheduledAt());
         OffsetDateTime searchExpiresAt = request.scheduledAt().minusHours(SEARCH_WINDOW_HOURS);
-        matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
+        matchRequest.changeConditions(request.scheduledAt(), request.talkLevel(), searchExpiresAt);
     }
 
     // 게시글을 CANCELLED로 전이시켜 모집 탭에서 내린다. 모집 중(SEARCHING)인 게시글만 취소할 수 있다(이슈 #100).

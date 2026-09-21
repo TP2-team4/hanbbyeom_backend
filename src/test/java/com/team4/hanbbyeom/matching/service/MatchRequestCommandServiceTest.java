@@ -52,7 +52,7 @@ class MatchRequestCommandServiceTest {
                 360,
                 400,
                 OffsetDateTime.ofInstant(FIXED_NOW, ZoneOffset.UTC).plusMinutes(30), // 최소 리드타임(3시간)보다 훨씬 임박함
-                "SILENT"
+                TalkLevel.SILENT
         );
 
         assertThatThrownBy(() -> service.create(1L, request))
@@ -156,7 +156,7 @@ class MatchRequestCommandServiceTest {
     void 수정은_게시글을_읽기_전에_matching_mutex_락을_먼저_잡는다() {
         postWithStatus(MatchRequestStatus.SEARCHING);
 
-        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT"));
+        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, TalkLevel.SILENT));
 
         InOrder order = inOrder(jdbcTemplate, matchRequestRepository);
         order.verify(jdbcTemplate).queryForObject(contains("matching_mutex"), eq(Long.class));
@@ -167,7 +167,7 @@ class MatchRequestCommandServiceTest {
     void 모집_중인_게시글은_수정된다() {
         MatchRequest post = postWithStatus(MatchRequestStatus.SEARCHING);
 
-        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT"));
+        service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, TalkLevel.SILENT));
 
         assertThat(post.getScheduledAt()).isEqualTo(UPDATE_SCHEDULED_AT);
         assertThat(post.getStatus()).isEqualTo(MatchRequestStatus.SEARCHING);
@@ -178,7 +178,7 @@ class MatchRequestCommandServiceTest {
         MatchRequest post = postWithStatus(MatchRequestStatus.PENDING_CONFIRMATION);
         OffsetDateTime before = post.getScheduledAt();
 
-        assertThatThrownBy(() -> service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT")))
+        assertThatThrownBy(() -> service.update(OWNER_ID, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, TalkLevel.SILENT)))
                 .isInstanceOf(MatchRequestNotSearchingException.class);
 
         assertThat(post.getScheduledAt()).isEqualTo(before);
@@ -189,7 +189,7 @@ class MatchRequestCommandServiceTest {
     void 수정도_본인_게시글이_아니면_403이다() {
         postWithStatus(MatchRequestStatus.SEARCHING);
 
-        assertThatThrownBy(() -> service.update(999L, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, "SILENT")))
+        assertThatThrownBy(() -> service.update(999L, POST_ID, new MatchRequestUpdateRequest(UPDATE_SCHEDULED_AT, TalkLevel.SILENT)))
                 .isInstanceOf(AccessDeniedException.class);
     }
 }
