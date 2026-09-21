@@ -2,7 +2,10 @@ package com.team4.hanbbyeom.auth.service;
 
 import com.team4.hanbbyeom.auth.domain.EmailVerification;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
+import com.team4.hanbbyeom.auth.exception.EmailVerificationFailedException;
+import com.team4.hanbbyeom.auth.exception.EmailVerificationConflictException;
 import com.team4.hanbbyeom.auth.exception.PasswordResetAuthenticationException;
+import com.team4.hanbbyeom.auth.exception.VerificationResendTooSoonException;
 import com.team4.hanbbyeom.auth.exception.VerificationCodeMismatchException;
 import com.team4.hanbbyeom.auth.repository.EmailVerificationRepository;
 import com.team4.hanbbyeom.global.util.EmailNormalizer;
@@ -87,7 +90,7 @@ public class EmailVerificationService {
 
         // 재발송 제한 응답: 기존 SIGNUP 목적과 동일한 문구 사용
         if (!resendAllowed) {
-            throw new IllegalStateException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
+            throw new VerificationResendTooSoonException("인증 코드는 잠시 후 다시 요청할 수 있습니다.");
         }
 
         String code = generateCode(); // 인증번호 생성
@@ -121,11 +124,11 @@ public class EmailVerificationService {
         // 이메일+목적으로 가장 최근에 생성된 인증 기록만 유효한 확인 대상으로 조회
         EmailVerification verification = emailVerificationRepository
                 .findTopByEmailAndPurposeOrderByCreatedAtDescIdDesc(email, purpose)
-                .orElseThrow(() -> new IllegalStateException("인증 코드 발송 내역이 없습니다. 인증 코드를 먼저 요청해주세요."));
+                .orElseThrow(() -> new EmailVerificationConflictException("인증 코드 발송 내역이 없습니다. 인증 코드를 먼저 요청해주세요."));
 
         // 이미 인증에 성공해 사용 완료된 코드인지 확인 (일회성 사용 보장)
         if (verification.getVerifiedAt() != null) {
-            throw new IllegalStateException("이미 사용된 인증 코드입니다.");
+            throw new EmailVerificationConflictException("이미 사용된 인증 코드입니다.");
         }
 
         // 유효기간이 지났는지 확인
@@ -134,12 +137,12 @@ public class EmailVerificationService {
                         verification.getExpiresAt() // DB에 저장된 인증번호 만료 시각
                 )
         ) {
-            throw new IllegalStateException("인증 코드가 만료되었습니다. 인증 코드를 다시 요청해주세요.");
+            throw new EmailVerificationConflictException("인증 코드가 만료되었습니다. 인증 코드를 다시 요청해주세요.");
         }
 
         // 이 코드에 대한 입력 실패 횟수가 허용 범위(5회)를 넘었는지 확인 (무차별 대입 방지)
         if (verification.getAttemptCount() >= MAX_ATTEMPT_COUNT) {
-            throw new IllegalStateException("인증 시도 횟수를 초과했습니다. 인증 코드를 다시 요청해주세요.");
+            throw new EmailVerificationConflictException("인증 시도 횟수를 초과했습니다. 인증 코드를 다시 요청해주세요.");
         }
 
         // 입력한 코드와 저장된 해시가 일치하는지 확인
@@ -303,7 +306,7 @@ public class EmailVerificationService {
 
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             // 해시 알고리즘을 사용할 수 없거나 비밀키 형식이 잘못된 경우 발생하는 예외
-            throw new IllegalStateException("해시 알고리즘을 사용할 수 없습니다.", e);
+            throw new EmailVerificationFailedException("해시 알고리즘을 사용할 수 없습니다.", e);
         }
     }
 
@@ -374,7 +377,7 @@ public class EmailVerificationService {
 
         } catch (MessagingException e) {
             // 메일 메시지를 구성하는 과정에서 문제가 발생하면 처리
-            throw new IllegalStateException("인증 메일 발송에 실패했습니다.", e);
+            throw new EmailVerificationFailedException("인증 메일 발송에 실패했습니다.", e);
         }
     }
 

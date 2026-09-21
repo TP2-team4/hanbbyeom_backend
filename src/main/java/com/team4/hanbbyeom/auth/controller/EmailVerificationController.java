@@ -33,7 +33,8 @@ public class EmailVerificationController {
     @Operation(
             summary = "이메일 인증 코드 발송",
             description = "이메일과 인증 목적을 받아 인증 코드를 발송합니다. "
-                    + "PASSWORD_RESET은 가입 여부 비노출을 위해 미가입·재발송 제한 요청도 200을 반환합니다(메일만 생략)."
+                    + "PASSWORD_RESET은 가입 여부 비노출을 위해 미가입·재발송 제한 요청도 200을 반환합니다(메일만 생략). "
+                    + "SIGNUP은 재발송 대기시간(60초) 이내 재요청이면 429이며, 대기 후 다시 요청하면 성공합니다."
     )
     @PostMapping
     public ResponseEntity<Void> send(@Valid @RequestBody EmailVerificationSendRequest request) {
@@ -52,7 +53,9 @@ public class EmailVerificationController {
     // 인증 코드 확인: POST /api/auth/email-verifications/confirm
     @Operation(
             summary = "이메일 인증 코드 확인",
-            description = "이메일로 발송된 6자리 인증 코드를 확인하고 인증 완료 상태로 처리합니다."
+            description = "이메일로 발송된 6자리 인증 코드를 확인하고 인증 완료 상태로 처리합니다. "
+                    + "발송 내역이 없거나 이미 사용·만료된 코드, 시도 횟수를 초과한 코드는 409이며 새 코드를 요청해야 합니다. "
+                    + "코드가 틀리면 400이고 남은 시도 횟수 안에서 다시 입력할 수 있습니다."
     )
     @PostMapping("/confirm")
     public ResponseEntity<Void> confirm(@Valid @RequestBody EmailVerificationConfirmRequest request) {

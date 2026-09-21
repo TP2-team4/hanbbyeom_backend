@@ -1,5 +1,6 @@
 package com.team4.hanbbyeom.auth.service;
 
+import com.team4.hanbbyeom.auth.exception.DuplicateEmailException;
 import com.team4.hanbbyeom.auth.domain.VerificationPurpose;
 import com.team4.hanbbyeom.auth.dto.LoginRequest;
 import com.team4.hanbbyeom.auth.dto.LoginResponse;
@@ -39,7 +40,7 @@ public class AuthService {
 
         // 탈퇴하지 않은 동일 이메일 사용자가 이미 있는지 확인 (중복차단)
         if (userRepository.existsByEmailAndDeletedAtIsNull(email)) {
-            throw new IllegalStateException("이미 가입된 이메일입니다.");
+            throw new DuplicateEmailException("이미 가입된 이메일입니다.");
         }
 
         // 이 이메일이 회원가입(SIGNUP) 목적으로 인증 완료된 실제 시각 조회 (미인증 시 예외)
