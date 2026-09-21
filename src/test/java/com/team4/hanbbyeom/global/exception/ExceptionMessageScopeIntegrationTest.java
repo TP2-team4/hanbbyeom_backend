@@ -89,14 +89,11 @@ class ExceptionMessageScopeIntegrationTest {
 
     // 라이브러리가 만든 메시지는 고정 문구로 대체
 
-    // 허용되지 않은 enum 값은 JSON 변환 단계(HttpMessageNotReadableException)에서 걸러져 고정 문구로 응답한다.
-    // 예전에는 서비스의 TalkLevel.valueOf()가 던진 IllegalArgumentException("No enum constant com.team4...")이 그대로 실리던
-    // 경로였는데, 요청 DTO가 enum 타입으로 바뀌면서(#127) 이 경로는 사라졌다. 그래서 이 테스트는 IllegalArgumentException 핸들러의
-    // 마스킹이 아니라 형식 오류 경로를 확인한다. 그 마스킹은 GlobalExceptionHandlerTest가 핸들러를 직접 호출해 확인한다
-    // (사용자 요청으로 도달하는 IllegalArgumentException 경로가 없어 HTTP 테스트로는 만들 수 없다)
     @Test
     @DisplayName("허용되지 않은 talkLevel 응답에 내부 클래스 경로 미포함")
     void 허용되지_않은_talkLevel의_내부_정보_미노출() throws Exception {
+        // enum에 없는 talkLevel 값은 JSON 변환 단계에서 400으로 거절하고,
+        // 내부 클래스명이나 패키지 경로가 노출되는 대신 고정된 안내 문구를 반환하는지 확인
         String body = """
                 {
                   "courseId": 1,
@@ -119,7 +116,7 @@ class ExceptionMessageScopeIntegrationTest {
                 .andExpect(jsonPath("$.message").value(not(containsString(INTERNAL_PACKAGE))));
     }
 
-    // ---- 다른 예외 계열이 함께 덮이지 않았는지 확인 ----
+    // 다른 예외 계열이 함께 덮이지 않았는지 확인
 
     @Test
     @DisplayName("상태 규칙 위반 안내 문구 유지")

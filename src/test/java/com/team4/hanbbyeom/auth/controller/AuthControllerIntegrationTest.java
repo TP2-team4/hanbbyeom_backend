@@ -130,10 +130,11 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("닉네임을 입력해주세요."));
     }
 
-    // NUL 문자(0x00)는 PostgreSQL이 저장하지 못해 DB 단계에서 500이 났다. 검증은 Controller 단계에서 끝난다
     @Test
     @DisplayName("닉네임에 NUL 문자가 있으면 한글 메시지와 함께 400")
-    void signUp_닉네임에_NUL_문자가_있으면_400() throws Exception {
+    void signUp_닉네임_NUL_문자_거부() throws Exception {
+        // NUL 문자(0x00)는 PostgreSQL 저장 불가라 검증이 없으면 DB 단계에서 500
+        // 검증은 Controller 단계에서 끝나므로 이메일 인증 데이터는 준비하지 않음
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(signUpBody("a\\u0000b")))

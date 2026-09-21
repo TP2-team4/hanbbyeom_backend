@@ -263,10 +263,11 @@ class ChatMessageIntegrationTest {
                 .andExpect(jsonPath("$.message").value("메시지는 100자 이하여야 합니다."));
     }
 
-    // NUL 문자(0x00)는 PostgreSQL이 저장하지 못해 DB 단계에서 500이 났다. 값은 JSON 이스케이프 문자열로 넘긴다
     @Test
-    @DisplayName("NUL 문자가 있는 메시지는 400이고 저장되지 않는다")
+    @DisplayName("NUL 문자가 있는 메시지는 400이고 저장되지 않음")
     void NUL_문자_메시지_거부() throws Exception {
+        // NUL 문자(0x00)는 PostgreSQL 저장 불가라 검증이 없으면 DB 단계에서 500
+        // PostgreSQL에 저장할 수 없는 NUL 문자가 포함된 메시지를 요청 검증 단계에서 400으로 거절하고 DB에 저장하지 않는지 확인
         TestMatch match = createMatch(ActivityMatchStatus.CONFIRMED, false);
 
         mockMvc.perform(post("/api/matching/matches/{activityMatchId}/messages", match.activityMatchId())
