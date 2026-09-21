@@ -43,14 +43,18 @@ class ApplyActiveConflictIntegrationTest {
 
     // 신청할 수 있는 모집글(활동은 2일 뒤, 러닝 조건 포함)
     private Long createPost(Long userId) {
-        OffsetDateTime start = OffsetDateTime.now().plusDays(2);
+        return createPost(userId, OffsetDateTime.now().plusDays(2));
+    }
+
+    // 활동 시작 시각을 지정한 모집글. 생성 시각을 시작 3일 전으로 두어, 시작이 임박한 글도 시간 순서 제약을 지켜 만들 수 있다
+    private Long createPost(Long userId, OffsetDateTime start) {
         Long postId = jdbcTemplate.queryForObject(
                 """
-                INSERT INTO match_request (user_id, status, scheduled_at, talk_level, search_expires_at)
-                VALUES (?, 'SEARCHING', ?, 'LIGHT_CHAT', ?)
+                INSERT INTO match_request (user_id, status, scheduled_at, talk_level, search_expires_at, created_at)
+                VALUES (?, 'SEARCHING', ?, 'LIGHT_CHAT', ?, ?)
                 RETURNING id
                 """,
-                Long.class, userId, start, start.minusHours(1));
+                Long.class, userId, start, start.minusHours(1), start.minusDays(3));
         Long courseId = jdbcTemplate.queryForObject(
                 "SELECT id FROM running_course WHERE name = ? LIMIT 1", Long.class, "뚝섬 한강공원");
         jdbcTemplate.update(
@@ -154,5 +158,36 @@ class ApplyActiveConflictIntegrationTest {
         Long otherPost = createPost(createUser("호스트"));
 
         apply(viewer, otherPost).andExpect(status().isCreated());
+    }
+
+    // ── 검증 순서: 400(요청 자체가 안 되는 것)이 409(지금 상태가 안 되는 것)보다 먼저 ────────────────
+    // 시작이 임박한 글은 시간이 갈수록 더 신청할 수 없어진다. 409("나중에 다시 시도")로 안내하면 사용자가 재시도만 반복하므로,
+    // 두 조건이 함께 걸리면 최종 거절인 400(시작 임박)을 알려야 한다.
+
+    @Test
+    @DisplayName("이미 신청 중인 사람이 시작이 임박한 글에 신청하면 409가 아니라 400(시작 임박)이다")
+    void 신청_중이어도_시작이_임박한_글은_400이다() throws Exception {
+        Long viewer = createUser("신청자");
+        Long postA = createPost(createUser("호스트A"));
+        Long imminent = createPost(createUser("호스트B"), OffsetDateTime.now().plusMinutes(30));
+
+        apply(viewer, postA).andExpect(status().isCreated());
+        apply(viewer, imminent)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("활동 시작 시각이 너무 임박해서 신청할 수 없어요."));
+    }
+
+    @Test
+    @DisplayName("작성자가 이미 신청 중이어도 시작이 임박한 그 작성자의 글에는 409가 아니라 400(시작 임박)이다")
+    void 작성자가_신청_중이어도_시작이_임박한_글은_400이다() throws Exception {
+        Long author = createUser("작성자");
+        Long applicant = createUser("신청자");
+        Long imminent = createPost(author, OffsetDateTime.now().plusMinutes(30));
+        Long otherPost = createPost(createUser("다른호스트"));
+
+        apply(author, otherPost).andExpect(status().isCreated());
+        apply(applicant, imminent)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("활동 시작 시각이 너무 임박해서 신청할 수 없어요."));
     }
 }
