@@ -316,4 +316,45 @@ public class RunApiIntegrationTest {
 
         assertThat(meetingPointLengthInDb()).isEqualTo(255);
     }
+
+    // 8. PostgreSQL은 text/varchar에 NUL(0x00)을 저장하지 못해 DB 단계에서 500이 났다. DTO 검증이 미리 400으로 거절한다.
+    // 통과했다면 이어지는 flush에서 DB 예외로 실패하므로, "DB 저장·수정이 발생하지 않는다"까지 함께 확인된다
+    @Test
+    void 만나는_곳에_NUL_문자가_있으면_등록이_400이고_저장되지_않는다() throws Exception {
+        RunConditionCreateRequest request = new RunConditionCreateRequest(
+                matchRequestId, courseId, "a\0b", 5000, 8000, 360, 400
+        );
+
+        mockMvc.perform(post("/api/run/conditions")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        entityManager.flush();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM run_match_condition WHERE match_request_id = ?",
+                Integer.class, matchRequestId)).isZero();
+    }
+
+    @Test
+    void 만나는_곳에_NUL_문자가_있으면_수정이_400이고_조건은_그대로다() throws Exception {
+        registerCondition("뚝섬유원지 3번 출구");
+        RunConditionUpdateRequest request = new RunConditionUpdateRequest(
+                courseId, "여의도\0 2번 출구", 3000, 6000, 310, 380
+        );
+
+        mockMvc.perform(patch("/api/run/conditions/{id}", matchRequestId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken(ownerUserId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        entityManager.flush();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT meeting_point FROM run_match_condition WHERE match_request_id = ?",
+                String.class, matchRequestId)).isEqualTo("뚝섬유원지 3번 출구");
+    }
 }

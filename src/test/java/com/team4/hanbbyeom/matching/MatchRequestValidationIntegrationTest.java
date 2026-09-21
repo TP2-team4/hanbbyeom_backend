@@ -1,6 +1,7 @@
 package com.team4.hanbbyeom.matching;
 
 import com.team4.hanbbyeom.global.security.jwt.JwtTokenProvider;
+import com.team4.hanbbyeom.matching.service.MatchRequestCommandService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
@@ -241,6 +242,87 @@ class MatchRequestValidationIntegrationTest {
                 Integer.class, userId)).isEqualTo(255);
     }
 
+    // PostgreSQL은 text/varchar에 NUL(0x00)을 저장하지 못해 DB 단계에서 500이 났다. DTO 검증에서 미리 400으로 거절한다.
+    // 값은 JSON 이스케이프 문자열로 넘긴다(파싱되면 실제 NUL 문자가 된다). postsOf()가 flush하므로, 요청이 통과해
+    // INSERT가 남아 있었다면 DB 예외로 이 테스트가 실패한다
+    @ParameterizedTest(name = "등록 요청의 만나는 곳에 NUL 문자가 있으면({0}) 400이고 게시글은 만들어지지 않는다")
+    @ValueSource(strings = {"a\\u0000b", "\\u0000", "뚝섬\\u0000"})
+    @DisplayName("등록 요청의 만나는 곳에 NUL 문자가 있으면 400이다")
+    void 등록_만나는_곳에_NUL_문자가_있으면_400이다(String jsonEscaped) throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("meetingPoint", "\"" + jsonEscaped + "\"");
+
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("만나는 곳에 사용할 수 없는 문자가 포함되어 있어요."));
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    // ---------- 일정의 최대 허용 시점 ----------
+
+    private static final String SCHEDULED_TOO_FAR_MESSAGE =
+            "활동 시작 시각은 지금부터 최대 " + MatchRequestCommandService.MAX_LEAD_DAYS + "일 이내여야 해요.";
+
+    // DB가 저장할 수 없는 범위(연도 999999999)까지 들어오면 예전에는 등록이 "이미 진행 중인 모집글" 409로, 수정은 500으로 나갔다
+    private static final String EXTREME_FUTURE = "+999999999-12-31T23:59:59Z";
+
+    @Test
+    @DisplayName("등록 요청의 일정이 허용 범위 안이면 정상 등록된다")
+    void 등록_일정이_허용_범위_안이면_등록된다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("scheduledAt", "\"" + OffsetDateTime.now().plusDays(MatchRequestCommandService.MAX_LEAD_DAYS - 1) + "\"");
+
+        create(userId, body).andExpect(status().isCreated());
+
+        assertThat(postsOf(userId)).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "등록 요청의 일정이 {0}이면 500·409가 아니라 400이고 게시글은 만들어지지 않는다")
+    @ValueSource(strings = {"MAX_PLUS_ONE_DAY", "EXTREME_FUTURE"})
+    @DisplayName("등록 요청의 일정이 최대 허용 시점을 넘으면 400이다")
+    void 등록_일정이_최대_허용_시점을_넘으면_400이다(String kind) throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        String scheduledAt = kind.equals("EXTREME_FUTURE")
+                ? EXTREME_FUTURE : OffsetDateTime.now().plusDays(MatchRequestCommandService.MAX_LEAD_DAYS + 1).toString();
+        body.put("scheduledAt", "\"" + scheduledAt + "\"");
+
+        create(userId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(SCHEDULED_TOO_FAR_MESSAGE));
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    @Test
+    @DisplayName("등록 요청의 일정이 극단적인 과거여도 500이 아니라 400이다")
+    void 등록_일정이_극단적인_과거여도_400이다() throws Exception {
+        Long userId = createUser();
+        Map<String, String> body = validCreateBody();
+        body.put("scheduledAt", "\"-999999999-01-01T00:00:00Z\"");
+
+        create(userId, body).andExpect(status().isBadRequest());
+
+        assertThat(postsOf(userId)).isZero();
+    }
+
+    // 이미 진행 중인 글이 있는 사용자의 등록은 유니크 인덱스(uq_match_request_active_user) 위반으로 409가 나가는 것이 맞다.
+    // 예외를 좁혀 잡아도(SQLState 23505) 실제 Postgres 예외가 그대로 인식되는지 확인한다.
+    // 위반 뒤에는 이 테스트의 트랜잭션이 중단 상태라 DB를 더 읽지 않는다
+    @Test
+    @DisplayName("이미 진행 중인 글이 있는 사용자가 또 등록하면 409다")
+    void 등록_이미_활성_글이_있으면_409다() throws Exception {
+        Long userId = createUser();
+        create(userId, validCreateBody()).andExpect(status().isCreated());
+
+        create(userId, validCreateBody())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("이미 진행 중인 모집글 또는 신청이 있어요."));
+    }
+
     @ParameterizedTest(name = "등록 요청의 talkLevel {0}은 정상으로 저장된다")
     @ValueSource(strings = {"SILENT", "LIGHT_CHAT"})
     @DisplayName("정해진 talkLevel 값은 문자열 그대로 받아 저장한다(JSON 형식은 그대로)")
@@ -306,6 +388,46 @@ class MatchRequestValidationIntegrationTest {
                 .andExpect(jsonPath("$.message").value(ENUM_FORMAT_MESSAGE));
 
         assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
+    }
+
+    private OffsetDateTime scheduledAtOf(Long postId) {
+        entityManager.flush();
+        entityManager.clear();
+        return jdbcTemplate.queryForObject("SELECT scheduled_at FROM match_request WHERE id = ?", OffsetDateTime.class, postId);
+    }
+
+    @ParameterizedTest(name = "수정 요청의 일정이 {0}이면 500이 아니라 400이고 기존 일정·대화 수준이 유지된다")
+    @ValueSource(strings = {"MAX_PLUS_ONE_DAY", "EXTREME_FUTURE"})
+    @DisplayName("수정 요청의 일정이 최대 허용 시점을 넘으면 400이고 기존 데이터가 유지된다")
+    void 수정_일정이_최대_허용_시점을_넘으면_400이다(String kind) throws Exception {
+        Long userId = createUser();
+        Long postId = createPost(userId);
+        OffsetDateTime before = scheduledAtOf(postId);
+        Map<String, String> body = validUpdateBody();
+        String scheduledAt = kind.equals("EXTREME_FUTURE")
+                ? EXTREME_FUTURE : OffsetDateTime.now().plusDays(MatchRequestCommandService.MAX_LEAD_DAYS + 1).toString();
+        body.put("scheduledAt", "\"" + scheduledAt + "\"");
+
+        update(userId, postId, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(SCHEDULED_TOO_FAR_MESSAGE));
+
+        assertThat(scheduledAtOf(postId)).isEqualTo(before);
+        assertThat(talkLevelOf(postId)).isEqualTo("SILENT");
+    }
+
+    @Test
+    @DisplayName("수정 요청의 일정이 허용 범위 안이면 정상 수정된다")
+    void 수정_일정이_허용_범위_안이면_수정된다() throws Exception {
+        Long userId = createUser();
+        Long postId = createPost(userId);
+        Map<String, String> body = validUpdateBody();
+        OffsetDateTime newSchedule = OffsetDateTime.now().plusDays(MatchRequestCommandService.MAX_LEAD_DAYS - 1);
+        body.put("scheduledAt", "\"" + newSchedule + "\"");
+
+        update(userId, postId, body).andExpect(status().isNoContent());
+
+        assertThat(scheduledAtOf(postId).toInstant()).isEqualTo(newSchedule.toInstant().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
     }
 
     @Test
