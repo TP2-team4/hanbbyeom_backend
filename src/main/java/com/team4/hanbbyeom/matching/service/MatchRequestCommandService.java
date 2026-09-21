@@ -8,10 +8,12 @@ import com.team4.hanbbyeom.matching.dto.MatchRequestUpdateRequest;
 import com.team4.hanbbyeom.matching.exception.AlreadyHasActiveMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.InvalidMatchRequestException;
 import com.team4.hanbbyeom.matching.exception.MatchRequestNotFoundException;
+import com.team4.hanbbyeom.matching.exception.MatchRequestNotSearchingException;
 import com.team4.hanbbyeom.matching.repository.MatchRequestRepository;
 import com.team4.hanbbyeom.run.dto.RunConditionCreateRequest;
 import com.team4.hanbbyeom.run.service.RunConditionService;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,14 +29,17 @@ public class MatchRequestCommandService {
 
     private final MatchRequestRepository matchRequestRepository;
     private final RunConditionService runConditionService; // 새로 주입
+    private final JdbcTemplate jdbcTemplate; // 취소 시 matching_mutex 락을 잡기 위해 사용
     // 등록 최소 리드타임 판정은 TimeConfig의 Clock 빈으로만 한다 (테스트에서 시계 고정 가능, #94)
     private final Clock clock;
 
     public MatchRequestCommandService(MatchRequestRepository matchRequestRepository,
                                       RunConditionService runConditionService,
+                                      JdbcTemplate jdbcTemplate,
                                       Clock clock) {
         this.matchRequestRepository = matchRequestRepository;
         this.runConditionService = runConditionService;
+        this.jdbcTemplate = jdbcTemplate;
         this.clock = clock;
     }
 
@@ -88,13 +93,38 @@ public class MatchRequestCommandService {
         matchRequest.changeConditions(request.scheduledAt(), TalkLevel.valueOf(request.talkLevel()), searchExpiresAt);
     }
 
-    // 게시글을 CANCELLED로 전이시켜 모집 탭에서 내린다. 주의: 현재 상태를 검사하지 않으므로
-    // 이미 신청이 걸려 PENDING_CONFIRMATION인 글도 그대로 취소 가능하다 — 이 경우 이미 생성된
-    // activity_match/match_participant 쪽은 여기서 정리하지 않으니 별도 확인이 필요하다.
+    // 게시글을 CANCELLED로 전이시켜 모집 탭에서 내린다. 모집 중(SEARCHING)인 게시글만 취소할 수 있다(이슈 #100).
+    //
+    // 예전에는 상태를 검사하지 않아, 이미 신청이 걸린 PENDING_CONFIRMATION이나 확정된 MATCHED 게시글도 취소됐다.
+    // 그러면 게시글만 CANCELLED가 되고 activity_match/match_participant는 정리되지 않아 두 가지가 어긋났다.
+    //  - 신청 대기 중 취소: 응답 기한이 지나 expireOverdue()가 돌면 취소한 게시글이 SEARCHING으로 되살아난다
+    //  - 확정 후 취소: 활동과 참가자가 그대로 남아 상대가 묶이고, 종료되면 취소한 활동이 완료로 집계된다
+    // 이미 신청이 걸렸다면 호스트가 먼저 신청을 거절(MatchDecisionService.reject)해 게시글이 SEARCHING으로 돌아온 뒤에
+    // 취소해야 한다. 확정된 매칭을 사용자가 직접 취소하는 기능은 아직 없다(제품 결정이 필요해 별도 이슈).
+    //
+    // 신청·수락·거절·만료·탈퇴 정리와 같이 matching_mutex 락을 먼저 잡는다. 락이 없으면 apply()가 게시글을
+    // PENDING_CONFIRMATION으로 바꾸는 것과 동시에 들어온 취소가 둘 다 SEARCHING으로 읽고 통과해, 상태 검사가 있어도
+    // 같은 불일치가 남는다. 락을 잡은 뒤에 게시글을 읽으므로 이미 커밋된 신청의 결과를 정확히 본다.
+    // 소유권 검증(404/403)을 상태 검사보다 앞에 둔다 — 본인 게시글이 아닌 사용자가 상태를 알아내지 못하게 하기 위함.
     @Transactional
     public void cancel(Long userId, Long matchRequestId) {
+        jdbcTemplate.queryForObject("SELECT id FROM matching_mutex WHERE id = 1 FOR UPDATE", Long.class);
+
         MatchRequest matchRequest = getOwnedMatchRequest(userId, matchRequestId, "내리");
+        if (matchRequest.getStatus() != MatchRequestStatus.SEARCHING) {
+            throw new MatchRequestNotSearchingException(notCancellableMessage(matchRequest.getStatus()));
+        }
         matchRequest.changeStatus(MatchRequestStatus.CANCELLED);
+    }
+
+    // 취소할 수 없는 상태별로 호스트가 다음에 무엇을 해야 하는지 알려준다.
+    private String notCancellableMessage(MatchRequestStatus status) {
+        return switch (status) {
+            case PENDING_CONFIRMATION -> "신청이 진행 중인 모집글이에요. 신청을 먼저 거절한 뒤 취소해주세요.";
+            case MATCHED -> "이미 확정된 매칭이 있는 모집글은 취소할 수 없어요.";
+            // CANCELLED/EXPIRED/CLOSED. SEARCHING은 취소 가능하므로 여기 오지 않는다.
+            default -> "이미 마감되었거나 취소된 모집글이에요.";
+        };
     }
 
     // update()/cancel() 공용 — 게시글을 찾아 존재 여부(404)와 소유권(403)을 함께 검증한다.

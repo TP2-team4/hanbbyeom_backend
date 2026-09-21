@@ -40,6 +40,7 @@ import java.util.List;
 // 로그인                POST /api/auth/login                       누구나 접근 가능
 // 이메일 인증 코드 발송   POST /api/auth/email-verifications          누구나 접근 가능
 // 이메일 인증 코드 확인   POST /api/auth/email-verifications/confirm  누구나 접근 가능
+// 비밀번호 재설정        POST /api/auth/password-reset               누구나 접근 가능
 // 러닝 코스 목록 조회     GET  /api/run/courses                      누구나 접근 가능
 // 스웨거 UI 진입 경로          /swagger-ui.html                      누구나 접근 가능
 // 스웨거 UI 정적 리소스        /swagger-ui/**                        누구나 접근 가능
@@ -74,10 +75,9 @@ public class SecurityConfig {
         return configuration.getAuthenticationManager();
     }
 
-    // CORS(Cross-Origin Resource Sharing): 브라우저가 "지금 보고 있는 사이트 주소"와 다른 주소로
-    // 요청을 보낼 때, 그 요청을 허용할지 서버가 응답 헤더로 알려주는 규칙
-    // → 프론트엔드(예: http://localhost:5173)와 백엔드(http://localhost:8080)는 주소가 다르므로,
-    //   허용해주지 않으면 브라우저가 응답을 받고도 JavaScript에 넘겨주지 않고 막아버림
+    // CORS(Cross-Origin Resource Sharing):
+    // 브라우저가 지금 보고 있는 사이트 주소와 다른 주소로 요청을 보낼 때 그 요청을 허용할지 서버가 응답 헤더로 알려주는 규칙
+    // → 프론트엔드와 백엔드는 주소가 다르므로 허용해주지 않으면 브라우저가 응답을 받고도 JavaScript에 넘겨주지 않고 막아버림
     //   (Postman·Swagger에서는 브라우저 규칙이 적용되지 않아 이 설정 없이도 잘 됨)
 
     // CorsConfigurationSource: (Spring 제공) 어떤 경로에 어떤 CORS 규칙을 적용할지 담아두는 객체
@@ -93,7 +93,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(allowedOrigins);
 
         // 우리 API가 사용하는 HTTP 메서드
-        // OPTIONS: 브라우저가 본 요청 전에 "이 요청 보내도 되냐"고 먼저 물어보는 preflight 요청용
+        // OPTIONS: 브라우저가 본 요청 전에 이 요청을 보내도 되는지 먼저 물어보는 preflight 요청용
         configuration.setAllowedMethods(
                 List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
 
@@ -104,15 +104,13 @@ public class SecurityConfig {
 
         // 브라우저 JavaScript가 응답에서 꺼내 읽을 수 있도록 허용할 헤더
         // → 이 목록에 없으면 응답에 헤더가 있어도 JavaScript에서는 보이지 않음
-        // Location: 201 Created 응답에서 새로 만들어진 리소스 주소를 읽기 위해
-        // WWW-Authenticate: 401이 "토큰 없음"인지 "토큰이 잘못됨(invalid_token)"인지 구분하기 위해
+        // Location: 201 Created 응답에서 새로 만들어진 리소스 주소를 읽기 위함
+        // WWW-Authenticate: 401이 토큰 없음인지 토큰이 잘못됨(invalid_token)인지 구분하기 위함
         configuration.setExposedHeaders(
                 List.of(HttpHeaders.LOCATION, HttpHeaders.WWW_AUTHENTICATE));
 
         // 쿠키·인증 정보를 자동으로 실어 보낼지 여부
         // 지금은 Access Token을 Authorization 헤더로 직접 담아 보내므로 필요 없음
-        // 주의(#4): Refresh Token을 HttpOnly Cookie로 전환하면 true로 바꿔야 하고,
-        //          그때는 Origin에 와일드카드(*)를 쓸 수 없으므로 주소를 정확히 지정해야 함
         configuration.setAllowCredentials(false);
 
         // 위 규칙을 적용할 경로 등록
@@ -146,13 +144,15 @@ public class SecurityConfig {
         // 주의: 공개 API를 추가할 때는 반드시 이 목록에 넣어야 함
         // → 아래 permitAll 줄에만 따로 추가하면 인가만 열리고 JWT 필터는 계속 실행되므로,
         //   만료된 토큰이 헤더에 남아 있을 때 공개 API인데도 401이 나감
-        // (swagger-ui·/v3/api-docs·/error는 이 목록 밖이지만, 브라우저가 해당 경로에
-        //  Authorization 헤더를 붙이지 않고 /error는 필터가 기본적으로 건너뛰므로 문제되지 않음)
+        // (swagger-ui·/v3/api-docs·/error는 이 목록 밖이지만,
+        // 브라우저가 해당 경로에 Authorization 헤더를 붙이지 않고
+        // /error는 필터가 기본적으로 건너뛰므로 문제되지 않음)
         RequestMatcher publicApiMatcher = new OrRequestMatcher(
                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/signup"),
                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/login"),
                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications"),
                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/email-verifications/confirm"),
+                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/api/auth/password-reset"),
                 PathPatternRequestMatcher.pathPattern(HttpMethod.GET, "/api/run/courses")
         );
 
@@ -160,17 +160,13 @@ public class SecurityConfig {
                 // cors: 위에서 등록한 CorsConfigurationSource Bean을 찾아 CORS 처리를 활성화
                 // → preflight(OPTIONS) 요청은 인가 판정 전에 처리되므로,
                 //   anyRequest().authenticated() 규칙 때문에 401이 나는 일이 없음
-                // 참고: Spring Security는 UrlBasedCorsConfigurationSource Bean이 있으면 이 설정을
-                //      자동으로 적용하므로 이 줄이 없어도 동작하지만, 필터 체인 구성만 봐도
-                //      CORS가 적용된다는 걸 알 수 있도록 명시적으로 남겨둠
+                // Spring Security는 UrlBasedCorsConfigurationSource Bean이 있으면 이 설정을 자동으로 적용
+                // But... 필터 체인 구성만 봐도 CORS가 적용된다는 걸 알 수 있도록 명시적으로 남겨둠
                 .cors(Customizer.withDefaults())
 
                 // CSRF 보호 비활성화
                 // Access Token을 Authorization 헤더로 직접 실어 보내는 방식이라 브라우저가 자동으로
                 // 인증 정보를 실어 보내지 않음 → 공격자 사이트가 요청을 흉내 낼 수 없어 CSRF 위험 없음
-                // 주의(#4): Refresh Token을 HttpOnly Cookie로 전환하면 이 전제가 깨짐
-                // 쿠키는 브라우저가 도메인만 보고 자동으로 실어 보내므로 CSRF 위험이 다시 생김
-                // → 그 시점에 CSRF 재활성화 또는 SameSite 쿠키 속성 등 별도 대책 필요, 지금 이대로 두면 안 됨!!
                 .csrf(csrf -> csrf.disable())
 
                 // sessionManagement: Spring Security의 Session 관리 방식을 설정
